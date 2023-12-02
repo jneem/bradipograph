@@ -1,19 +1,18 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-use alloc::vec::Vec;
-
 use arclen::{bendiness, inv_bendiness};
+use heapless::Vec;
 use kurbo::{
-    BezPath, CubicBez, ParamCurve, ParamCurveArclen, ParamCurveCurvature, PathSeg, Point, Vec2,
+    BezPath, CubicBez, Line, ParamCurve, ParamCurveArclen, ParamCurveCurvature, PathEl, PathSeg,
+    Point, QuadBez, Vec2,
 };
 
 mod arclen;
 
 #[derive(Clone, Debug, serde::Serialize)]
-pub struct MotionCurve {
-    pub points: Vec<Point>,
-    pub energies: Vec<f64>,
+pub struct MotionCurve<const CAP: usize> {
+    pub points: Vec<Point, CAP>,
+    pub energies: Vec<f64, CAP>,
 }
 
 #[derive(Clone, Debug)]
@@ -23,38 +22,51 @@ pub struct PlannerConfig {
     pub accuracy: f64,
 }
 
-impl MotionCurve {
-    pub fn plan(path: &BezPath, config: &PlannerConfig, transform: &impl Transform) -> Self {
-        let paths = split_one_at_corners(path, config.accuracy);
-
-        Self::from_paths(paths.iter(), config, transform)
-    }
-
-    fn from_paths<'a>(
-        paths: impl Iterator<Item = &'a BezPath>,
-        config: &PlannerConfig,
-        transform: &impl Transform,
-    ) -> Self {
+// TODO: right now, if we run out of capacity then we panic. Be more robust.
+impl<const CAP: usize> MotionCurve<CAP> {
+    pub fn plan(path: &mut BezPath, config: &PlannerConfig, transform: &impl Transform) -> Self {
         let mut ret = MotionCurve {
             points: Vec::new(),
             energies: Vec::new(),
         };
 
-        for p in paths {
-            ret.append_smooth_path(p, config, transform);
+        assert!(!path.is_empty());
+        let mut start = 1;
+        let PathEl::MoveTo(mut start_point) = path.elements()[0] else {
+            panic!("invalid bez");
+        };
+        if matches!(path.elements().last(), Some(PathEl::ClosePath)) {
+            *path.elements_mut().last_mut().unwrap() = PathEl::LineTo(start_point);
         }
+        let mut segments = path.segments().peekable();
+        while start < path.elements().len() {
+            let take = TakeWhileSmooth::new(&mut segments, config.accuracy);
+            let smooth_count = take.count();
+            assert!(smooth_count > 0);
+
+            let end = start + smooth_count;
+            let subpath = Subpath {
+                path: &path.elements()[start..end],
+                start: start_point,
+            };
+
+            ret.append_smooth_path(subpath, config, transform);
+            start = end;
+            start_point = subpath.path.last().unwrap().end_point().unwrap();
+        }
+
         ret
     }
 
     fn append_smooth_path(
         &mut self,
-        path: &BezPath,
+        path: Subpath<'_>,
         config: &PlannerConfig,
         transform: &impl Transform,
     ) {
         let transformed_path = TransformedPath { path, transform };
 
-        let plan = Energizer::plan(
+        let plan = Energizer::<CAP>::plan(
             &transformed_path,
             // FIXME: get rid of this magic 10.0 constant
             config.accuracy * 10.0,
@@ -68,29 +80,59 @@ impl MotionCurve {
     }
 }
 
-pub struct MotionPlan {
-    pub curves: Vec<MotionCurve>,
+#[derive(Copy, Clone, Debug)]
+pub struct Subpath<'a> {
+    path: &'a [PathEl],
+    start: Point,
 }
 
-impl MotionPlan {}
+impl<'a> Subpath<'a> {
+    pub fn get_seg(&self, idx: usize) -> PathSeg {
+        let start = if idx == 0 {
+            self.start
+        } else {
+            match &self.path[idx - 1] {
+                PathEl::LineTo(p) => *p,
+                PathEl::QuadTo(_, p) => *p,
+                PathEl::CurveTo(_, _, p) => *p,
+                _ => panic!("invalid bez path"),
+            }
+        };
 
-pub fn split_one_at_corners(path: &BezPath, accuracy: f64) -> Vec<BezPath> {
-    let mut ret = Vec::new();
+        match self.path[idx] {
+            PathEl::LineTo(p) => PathSeg::Line(Line::new(start, p)),
+            PathEl::QuadTo(p, q) => PathSeg::Quad(QuadBez::new(start, p, q)),
+            PathEl::CurveTo(p, q, r) => PathSeg::Cubic(CubicBez::new(start, p, q, r)),
+            // Note: we need to ensure that our paths don't have ClosePath.
+            _ => panic!("invalid bez path"),
+        }
+    }
 
-    let mut cur = BezPath::new();
+    pub fn segments(&self) -> impl Iterator<Item = PathSeg> + '_ {
+        kurbo::segments(
+            core::iter::once(PathEl::MoveTo(self.start)).chain(self.path.iter().cloned()),
+        )
+    }
+}
 
-    // path must start with a MoveTo; add it to our curve
-    cur.push(path.iter().next().unwrap());
+struct TakeWhileSmooth<'a, I: Iterator> {
+    segs: &'a mut core::iter::Peekable<I>,
+    prev_tangent: Option<Vec2>,
+    accuracy: f64,
+}
 
-    let mut prev_tangent = None::<Vec2>;
-    for seg in path.segments() {
-        let (start_tangent, end_tangent) = match seg {
+impl<'a, I: Iterator<Item = PathSeg>> Iterator for TakeWhileSmooth<'a, I> {
+    type Item = PathSeg;
+
+    fn next(&mut self) -> Option<PathSeg> {
+        let next_seg = self.segs.peek()?;
+        let (start_tangent, end_tangent) = match next_seg {
             kurbo::PathSeg::Line(ell) => (ell.p1 - ell.p0, ell.p1 - ell.p0),
             kurbo::PathSeg::Quad(q) => (q.p1 - q.p0, q.p2 - q.p1),
             kurbo::PathSeg::Cubic(c) => (c.p1 - c.p0, c.p2 - c.p1),
         };
 
-        if let Some(prev_tangent) = prev_tangent {
+        if let Some(prev_tangent) = self.prev_tangent {
             // If one of the tangents is close to zero, say that they aren't parallel. This
             // might be a false positive, but it saves us from having to consider the next
             // derivative.
@@ -99,41 +141,34 @@ pub fn split_one_at_corners(path: &BezPath, accuracy: f64) -> Vec<BezPath> {
 
             // If the tangents aren't approximately parallel, it's a corner.
             is_corner |= prev_tangent.cross(start_tangent).abs()
-                < accuracy * prev_tangent.length() * start_tangent.length();
+                < self.accuracy * prev_tangent.length() * start_tangent.length();
 
             // If the tangents are pointing in opposite directions, it's a corner.
             is_corner |= prev_tangent.dot(start_tangent) <= 0.;
 
             if is_corner {
-                ret.push(cur);
-                cur = BezPath::new();
-                cur.push(kurbo::PathEl::MoveTo(seg.start()));
+                return None;
             }
         }
-
-        cur.push(seg.as_path_el());
-        prev_tangent = Some(end_tangent);
+        self.prev_tangent = Some(end_tangent);
+        self.segs.next()
     }
-
-    ret.push(cur);
-    ret
 }
 
-pub fn split_at_corners<'a>(
-    paths: impl IntoIterator<Item = &'a BezPath>,
-    accuracy: f64,
-) -> Vec<BezPath> {
-    let mut ret = Vec::new();
-    for path in paths {
-        ret.append(&mut split_one_at_corners(path, accuracy));
+impl<'a, I: Iterator<Item = PathSeg>> TakeWhileSmooth<'a, I> {
+    pub fn new(iter: &'a mut core::iter::Peekable<I>, accuracy: f64) -> Self {
+        Self {
+            segs: iter,
+            prev_tangent: None,
+            accuracy,
+        }
     }
-    ret
 }
 
 pub trait Transform: Clone {
-    fn f(&self, input: &Point) -> Point;
-    fn df(&self, input: &Point, direction: &Vec2) -> Vec2;
-    fn ddf(&self, input: &Point, u: &Vec2, v: &Vec2) -> Vec2;
+    fn f(&self, input: Point) -> Point;
+    fn df(&self, input: Point, direction: Vec2) -> Vec2;
+    fn ddf(&self, input: Point, u: Vec2, v: Vec2) -> Vec2;
 }
 
 pub struct TransformedCurve<T> {
@@ -142,18 +177,18 @@ pub struct TransformedCurve<T> {
 }
 
 pub struct TransformedPath<'a, T> {
-    pub path: &'a BezPath,
+    pub path: Subpath<'a>,
     pub transform: &'a T,
 }
 
 impl<'a, T: Transform + Clone> TransformedPath<'a, T> {
     fn seg_time(&self, t: PathTime) -> (PathSeg, f64) {
-        (self.path.get_seg(t.idx + 1).unwrap(), t.t)
+        (self.path.get_seg(t.idx), t.t)
     }
 
     pub fn eval(&self, t: PathTime) -> Point {
         let (seg, t) = self.seg_time(t);
-        self.transform.f(&seg.eval(t))
+        self.transform.f(seg.eval(t))
     }
 
     pub fn curvature(&self, t: PathTime) -> f64 {
@@ -167,20 +202,20 @@ impl<'a, T: Transform + Clone> TransformedPath<'a, T> {
 }
 
 #[derive(Debug)]
-pub struct Energizer {
+pub struct Energizer<const CAP: usize> {
     pub emax: f64,
     pub amax: f64,
-    pub increments: Vec<f64>,
-    pub time: Vec<PathTime>,
-    pub curvature: Vec<f64>,
-    pub energy: Vec<f64>,
+    pub increments: Vec<f64, CAP>,
+    pub time: Vec<PathTime, CAP>,
+    pub curvature: Vec<f64, CAP>,
+    pub energy: Vec<f64, CAP>,
 }
 
 fn square(x: f64) -> f64 {
     x * x
 }
 
-impl Energizer {
+impl<const CAP: usize> Energizer<CAP> {
     pub fn plan<T: Transform + Clone>(
         path: &TransformedPath<T>,
         increment: f64,
@@ -199,8 +234,10 @@ impl Energizer {
         emax: f64,
         amax: f64,
     ) -> Self {
-        let (time, increments) = discretize_time(path, increment);
-        let curvature: Vec<_> = time.iter().map(|t| path.curvature(*t)).collect();
+        let mut time = Vec::new();
+        let mut increments = Vec::new();
+        discretize_time(path, increment, &mut time, &mut increments);
+        let curvature: Vec<_, CAP> = time.iter().map(|t| path.curvature(*t)).collect();
         let energy = curvature
             .iter()
             .map(|kappa| emax.min(2. * amax / kappa.abs()))
@@ -262,13 +299,12 @@ impl PathTime {
     }
 }
 
-pub fn discretize_time<T: Transform + Clone>(
+pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
     path: &TransformedPath<T>,
     increment: f64,
-) -> (Vec<PathTime>, Vec<f64>) {
-    // let accuracy = increment / 3.0;
-    let mut times = Vec::new();
-    let mut increments = Vec::new();
+    times: &mut Vec<PathTime, CAP>,
+    increments: &mut Vec<f64, CAP>,
+) {
     times.push(PathTime::new(0, 0.0));
 
     let mut bend_accumulated = 0.0;
@@ -301,7 +337,7 @@ pub fn discretize_time<T: Transform + Clone>(
             }
 
             // t_step = 1.0 is basically equivalent to t = 1.0, but more numerically reliable.
-            if t_step >= 1.0 {
+            if t_step >= 1.0 || prev_t >= 1.0 {
                 break;
             }
             prev_t = t;
@@ -313,6 +349,4 @@ pub fn discretize_time<T: Transform + Clone>(
         times.push(PathTime::new(idx, 1.0));
         increments.push(arclen_accumulated);
     }
-
-    (times, increments)
 }

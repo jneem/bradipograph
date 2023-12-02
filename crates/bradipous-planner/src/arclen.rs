@@ -17,7 +17,7 @@ pub struct DerivDerivTransformedCurve<T> {
 
 impl<T: Transform + Clone> ParamCurve for TransformedCurve<T> {
     fn eval(&self, t: f64) -> kurbo::Point {
-        self.transform.f(&self.curve.eval(t))
+        self.transform.f(self.curve.eval(t))
     }
 
     fn subsegment(&self, range: core::ops::Range<f64>) -> Self {
@@ -32,7 +32,7 @@ impl<T: Transform + Clone> ParamCurve for DerivTransformedCurve<T> {
     fn eval(&self, t: f64) -> kurbo::Point {
         let pt = self.curve.eval(t);
         let v = self.curve.deriv().eval(t).to_vec2();
-        self.transform.df(&pt, &v).to_point()
+        self.transform.df(pt, v).to_point()
     }
 
     fn subsegment(&self, range: core::ops::Range<f64>) -> Self {
@@ -49,7 +49,7 @@ impl<T: Transform + Clone> ParamCurve for DerivDerivTransformedCurve<T> {
         let v = self.curve.deriv().eval(t).to_vec2();
         let w = self.curve.deriv().deriv().eval(t).to_vec2();
 
-        (self.transform.ddf(&pt, &v, &v) + self.transform.df(&pt, &w)).to_point()
+        (self.transform.ddf(pt, v, v) + self.transform.df(pt, w)).to_point()
     }
 
     fn subsegment(&self, range: core::ops::Range<f64>) -> Self {

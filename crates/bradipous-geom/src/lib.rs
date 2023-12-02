@@ -1,130 +1,37 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use libm::{sqrtf, tanf};
+use bradipous_planner::Transform;
+use kurbo::{Point, Rect, Vec2};
+use libm::{sqrt, tan};
 
-fn square(x: f32) -> f32 {
+fn square(x: f64) -> f64 {
     x * x
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct Angle {
-    radians: f32,
+    radians: f64,
 }
 
 impl Angle {
-    pub fn from_degrees(degrees: f32) -> Angle {
+    pub fn from_degrees(degrees: f64) -> Angle {
         Angle {
-            radians: degrees * core::f32::consts::PI / 180.0,
+            radians: degrees * core::f64::consts::PI / 180.0,
         }
     }
 
-    pub fn from_radians(radians: f32) -> Angle {
+    pub fn from_radians(radians: f64) -> Angle {
         Angle { radians }
     }
 
-    pub fn radians(&self) -> f32 {
+    pub fn radians(&self) -> f64 {
         self.radians
     }
 }
 
-pub struct Rect {
-    // Left edge
-    pub x0: f32,
-    // Top edge (we're y-down)
-    pub y0: f32,
-    // Right edge
-    pub x1: f32,
-    // Bottom edge
-    pub y1: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Point {
-    pub fn to_arm_lengths(&self, config: &Config) -> ArmLengths {
-        config.arm_lengths(self)
-    }
-
-    // TODO: implement motion_planner::Transform for this transformation
-    pub fn to_rotor_angles(&self, config: &Config) -> RotorAngles {
-        config.rotor_angles(&self.to_arm_lengths(config))
-    }
-
-    pub fn to_vec(&self) -> Vec2 {
-        Vec2 {
-            x: self.x,
-            y: self.y,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl core::ops::Sub<Point> for Point {
-    type Output = Vec2;
-
-    fn sub(self, rhs: Point) -> Vec2 {
-        Vec2 {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
-impl core::ops::Mul<f32> for Vec2 {
-    type Output = Vec2;
-
-    fn mul(self, factor: f32) -> Vec2 {
-        Vec2 {
-            x: self.x * factor,
-            y: self.y * factor,
-        }
-    }
-}
-
-impl core::ops::Add<Vec2> for Point {
-    type Output = Point;
-
-    fn add(self, rhs: Vec2) -> Point {
-        Point {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-        }
-    }
-}
-
-impl core::ops::Add<Vec2> for Vec2 {
-    type Output = Vec2;
-
-    fn add(self, rhs: Vec2) -> Vec2 {
-        Vec2 {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-        }
-    }
-}
-impl core::ops::Sub<Vec2> for Vec2 {
-    type Output = Vec2;
-
-    fn sub(self, rhs: Vec2) -> Vec2 {
-        Vec2 {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
 pub struct ArmLengths {
-    pub left: f32,
-    pub right: f32,
+    pub left: f64,
+    pub right: f64,
 }
 
 pub struct RotorAngles {
@@ -144,9 +51,9 @@ impl RotorAngles {
 // TODO: might be fun to add some typestate to make sure things are initialized properly...
 pub struct ConfigBuilder {
     min_angle: Angle,
-    max_hang: f32,
-    claw_distance: f32,
-    spool_radius: f32,
+    max_hang: f64,
+    claw_distance: f64,
+    spool_radius: f64,
 }
 
 impl Default for ConfigBuilder {
@@ -167,7 +74,7 @@ impl ConfigBuilder {
             spool_radius: self.spool_radius,
             min_angle: self.min_angle,
             max_hang: self.max_hang,
-            hang_offset: self.claw_distance * tanf(self.min_angle.radians()),
+            hang_offset: self.claw_distance * tan(self.min_angle.radians()),
         }
     }
 
@@ -182,17 +89,17 @@ impl ConfigBuilder {
     /// `hang` is the distance that the head was hanging below the claws, and
     /// `arm_change` is the change in arm lengths when moving from one hanging
     /// position to the other.
-    pub fn with_hanging_calibration(&mut self, hang: f32, arm_change: f32) -> &mut Self {
-        self.claw_distance = sqrtf(square(arm_change) + 2.0 * arm_change * hang);
+    pub fn with_hanging_calibration(&mut self, hang: f64, arm_change: f64) -> &mut Self {
+        self.claw_distance = sqrt(square(arm_change) + 2.0 * arm_change * hang);
         self
     }
 
-    pub fn with_max_hang(&mut self, max_hang: f32) -> &mut Self {
+    pub fn with_max_hang(&mut self, max_hang: f64) -> &mut Self {
         self.max_hang = max_hang;
         self
     }
 
-    pub fn with_spool_radius(&mut self, spool_radius: f32) -> &mut Self {
+    pub fn with_spool_radius(&mut self, spool_radius: f64) -> &mut Self {
         self.spool_radius = spool_radius;
         self
     }
@@ -200,16 +107,16 @@ impl ConfigBuilder {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub claw_distance: f32,
-    pub spool_radius: f32,
+    pub claw_distance: f64,
+    pub spool_radius: f64,
     pub min_angle: Angle,
-    pub max_hang: f32,
+    pub max_hang: f64,
 
     // Our smallest hang, determined by min_angle and claw_distance. We
     // offset our publicly-visible coordinates by this amount, so that
     // our (0, 0) coordinate is in the middle of the two claws, hanging
     // below them by `hang_offset`.
-    hang_offset: f32,
+    hang_offset: f64,
 }
 
 impl Config {
@@ -226,8 +133,8 @@ impl Config {
         let x = p.x;
         let y = p.y + self.hang_offset;
         ArmLengths {
-            left: sqrtf(square(self.claw_distance / 2.0 + x) + square(y)),
-            right: sqrtf(square(self.claw_distance / 2.0 - x) + square(y)),
+            left: sqrt(square(self.claw_distance / 2.0 + x) + square(y)),
+            right: sqrt(square(self.claw_distance / 2.0 - x) + square(y)),
         }
     }
 
@@ -239,15 +146,9 @@ impl Config {
     }
 }
 
-pub trait Transform {
-    fn f(&self, input: Point) -> Point;
-    fn df(&self, input: Point, direction: Vec2) -> Vec2;
-    fn ddf(&self, input: Point, u: Vec2, v: Vec2) -> Vec2;
-}
-
 impl Transform for Config {
     fn f(&self, input: Point) -> Point {
-        input.to_rotor_angles(self).to_point()
+        self.rotor_angles(&self.arm_lengths(&input)).to_point()
     }
 
     fn df(&self, input: Point, direction: Vec2) -> Vec2 {
@@ -303,7 +204,7 @@ mod tests {
         type Strategy = BoxedStrategy<Config>;
 
         fn arbitrary_with(_: ()) -> Self::Strategy {
-            (1.0..10.0f32, 1.0..10.0f32, 1.0..10.0f32)
+            (1.0..10.0f64, 1.0..10.0f64, 1.0..10.0f64)
                 .prop_map(|(r, d, h)| Config {
                     claw_distance: d,
                     spool_radius: r,
@@ -318,7 +219,7 @@ mod tests {
     proptest! {
         // Check that our formula for the gradient is correct by comparing it to the difference quotient.
         #[test]
-        fn test_df(cfg: Config, x in -10.0..10.0f32, y in 1.0..100.0f32, vx in -1.0..1.0f32, vy in -1.0..1.0f32) {
+        fn test_df(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64, vx in -1.0..1.0f64, vy in -1.0..1.0f64) {
             let p = Point { x, y };
             let v = Vec2 { x: vx, y: vy };
             let fp = cfg.f(p);
@@ -333,7 +234,7 @@ mod tests {
         // Check that our formula for the second derivative is correct by comparing it to the difference quotient
         // of the gradient.
         #[test]
-        fn test_ddf(cfg: Config, x in -10.0..10.0f32, y in 1.0..100.0f32, vx in -1.0..1.0f32, vy in -1.0..1.0f32, wx in -1.0..1.0f32, wy in -1.0..1.0f32) {
+        fn test_ddf(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64, vx in -1.0..1.0f64, vy in -1.0..1.0f64, wx in -1.0..1.0f64, wy in -1.0..1.0f64) {
             let p = Point { x, y };
             let v = Vec2 { x: vx, y: vy };
             let w = Vec2 { x: wx, y: wy };

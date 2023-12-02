@@ -3,13 +3,13 @@ name = "bradipous-geom"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
-std = []
+std = ["bradipous-planner/std"]
 default = ["std"]
 
 [dependencies]
+bradipous-planner = { version = "0.1.0", path = "../bradipous-planner", default-features = false }
+kurbo = { version = "0.10.4", default-features = false, features = ["libm"] }
 libm = "0.2.8"
 
 [dev-dependencies]

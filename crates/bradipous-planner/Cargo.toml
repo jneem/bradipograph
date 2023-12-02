@@ -8,6 +8,7 @@ default = ["std"]
 std = []
 
 [dependencies]
+heapless = { version = "0.8.0", features = ["serde"] }
 kurbo = { version = "0.10.4", features = ["serde"] }
 serde = { version = "1.0.190", default-features = false, features = ["derive"] }
 
