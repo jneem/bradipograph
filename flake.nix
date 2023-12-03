@@ -1,20 +1,41 @@
 {
-  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
-  inputs.organist = {
-    url = "github:nickel-lang/organist";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-  inputs.fenix = {
-    url = "github:nix-community/fenix";
-    inputs.nixpkgs.follows = "nixpkgs";
+  description = "Devshell for esp32c3 dev";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    fenix.url = "github:nix-community/fenix";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  nixConfig = {
-    extra-substituters = ["https://organist.cachix.org"];
-    extra-trusted-public-keys = ["organist.cachix.org-1:GB9gOx3rbGl7YEh6DwOscD1+E/Gc5ZCnzqwObNH2Faw="];
-  };
-
-  outputs = {organist, ...} @ inputs:
-    let system = "x86_64-linux"; in
-    organist.flake.outputsFromNickel ./. (inputs // { fenix = inputs.fenix.packages.${system}; }) {};
+  outputs = { self, nixpkgs, fenix, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ fenix.overlays.default ];
+        };
+        fx = fenix.packages.${system};
+        rust-toolchain = fx.combine [
+          fx.latest.cargo
+          fx.latest.rustc
+          fx.latest.rust-analyzer
+          fx.latest.clippy
+          fx.latest.rustfmt
+          fx.latest.rust-src
+        ];
+        python-toolchain = pkgs.python3.withPackages (ps: [ps.bleak]);
+      in
+      {
+        devShell = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [
+            rust-toolchain
+            python-toolchain
+            cargo-espflash
+            cargo-outdated
+            taplo
+            wireshark
+          ];
+        };
+      }
+    );
 }
