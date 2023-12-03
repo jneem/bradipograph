@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use bradipous_curves::Curve;
 use bradipous_planner::{MotionCurve, PlannerConfig, Transform};
 use clap::Parser as _;
 use kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
@@ -55,13 +56,14 @@ pub fn main() -> anyhow::Result<()> {
         accuracy: args.accuracy,
     };
 
-    let plans = paths
-        .iter_mut()
-        .map(|p| MotionCurve::<1024>::plan(p, &config, &BrachioTransform))
-        .collect::<Vec<_>>();
+    let mut curve = Curve::<1024>::default();
+    for p in paths.iter() {
+        curve.extend(p).unwrap();
+    }
+    let m = MotionCurve::<1024>::plan(&curve, &config, &BrachioTransform);
     let out = File::create(&args.output)?;
 
-    serde_json::to_writer(out, &plans)?;
+    serde_json::to_writer(out, &m)?;
 
     Ok(())
 }

@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use arclen::{bendiness, inv_bendiness};
+use bradipous_curves::{Curve, CurveRef};
 use heapless::Vec;
 use kurbo::{
     BezPath, CubicBez, Line, ParamCurve, ParamCurveArclen, ParamCurveCurvature, PathEl, PathSeg,
@@ -24,35 +25,18 @@ pub struct PlannerConfig {
 
 // TODO: right now, if we run out of capacity then we panic. Be more robust.
 impl<const CAP: usize> MotionCurve<CAP> {
-    pub fn plan(path: &mut BezPath, config: &PlannerConfig, transform: &impl Transform) -> Self {
+    pub fn plan<const C: usize>(
+        path: &Curve<C>,
+        config: &PlannerConfig,
+        transform: &impl Transform,
+    ) -> Self {
         let mut ret = MotionCurve {
             points: Vec::new(),
             energies: Vec::new(),
         };
 
-        assert!(!path.is_empty());
-        let mut start = 1;
-        let PathEl::MoveTo(mut start_point) = path.elements()[0] else {
-            panic!("invalid bez");
-        };
-        if matches!(path.elements().last(), Some(PathEl::ClosePath)) {
-            *path.elements_mut().last_mut().unwrap() = PathEl::LineTo(start_point);
-        }
-        let mut segments = path.segments().peekable();
-        while start < path.elements().len() {
-            let take = TakeWhileSmooth::new(&mut segments, config.accuracy);
-            let smooth_count = take.count();
-            assert!(smooth_count > 0);
-
-            let end = start + smooth_count;
-            let subpath = Subpath {
-                path: &path.elements()[start..end],
-                start: start_point,
-            };
-
-            ret.append_smooth_path(subpath, config, transform);
-            start = end;
-            start_point = subpath.path.last().unwrap().end_point().unwrap();
+        for seg in path.subcurves() {
+            ret.append_smooth_path(seg, config, transform);
         }
 
         ret
@@ -60,7 +44,7 @@ impl<const CAP: usize> MotionCurve<CAP> {
 
     fn append_smooth_path(
         &mut self,
-        path: Subpath<'_>,
+        path: CurveRef<'_>,
         config: &PlannerConfig,
         transform: &impl Transform,
     ) {
@@ -75,7 +59,7 @@ impl<const CAP: usize> MotionCurve<CAP> {
         );
 
         self.points
-            .extend(plan.time.iter().map(|t| transformed_path.eval(*t)));
+            .extend(transformed_path.evals(plan.time.iter().copied()));
         self.energies.extend_from_slice(&plan.energy);
     }
 }
@@ -177,27 +161,57 @@ pub struct TransformedCurve<T> {
 }
 
 pub struct TransformedPath<'a, T> {
-    pub path: Subpath<'a>,
+    pub path: CurveRef<'a>,
     pub transform: &'a T,
 }
 
 impl<'a, T: Transform + Clone> TransformedPath<'a, T> {
-    fn seg_time(&self, t: PathTime) -> (PathSeg, f64) {
-        (self.path.get_seg(t.idx), t.t)
+    fn seg_times<'b>(
+        &self,
+        ts: impl Iterator<Item = PathTime> + 'b,
+    ) -> impl Iterator<Item = (PathSeg, f64)> + 'b
+    where
+        'a: 'b,
+    {
+        let mut segs = self.path.segments();
+        let mut seg_idx = 0;
+        let mut seg = segs.next();
+        ts.scan((), move |_, t| {
+            while t.idx > seg_idx {
+                seg_idx += 1;
+                seg = segs.next();
+            }
+
+            assert!(t.idx == seg_idx);
+            Some((seg.unwrap(), t.t))
+        })
     }
 
-    pub fn eval(&self, t: PathTime) -> Point {
-        let (seg, t) = self.seg_time(t);
-        self.transform.f(seg.eval(t))
+    pub fn evals<'b>(
+        &self,
+        ts: impl Iterator<Item = PathTime> + 'b,
+    ) -> impl Iterator<Item = Point> + 'b
+    where
+        'a: 'b,
+    {
+        self.seg_times(ts)
+            .map(|(seg, t)| self.transform.f(seg.eval(t)))
     }
 
-    pub fn curvature(&self, t: PathTime) -> f64 {
-        let (seg, t) = self.seg_time(t);
-        let transformed = TransformedCurve {
-            transform: self.transform.clone(),
-            curve: seg.to_cubic(),
-        };
-        transformed.curvature(t)
+    pub fn curvatures<'b>(
+        &self,
+        ts: impl Iterator<Item = PathTime> + 'b,
+    ) -> impl Iterator<Item = f64> + 'b
+    where
+        'a: 'b,
+    {
+        self.seg_times(ts).map(|(seg, t)| {
+            let transformed = TransformedCurve {
+                transform: self.transform.clone(),
+                curve: seg.to_cubic(),
+            };
+            transformed.curvature(t)
+        })
     }
 }
 
@@ -237,7 +251,7 @@ impl<const CAP: usize> Energizer<CAP> {
         let mut time = Vec::new();
         let mut increments = Vec::new();
         discretize_time(path, increment, &mut time, &mut increments);
-        let curvature: Vec<_, CAP> = time.iter().map(|t| path.curvature(*t)).collect();
+        let curvature: Vec<_, CAP> = path.curvatures(time.iter().cloned()).collect();
         let energy = curvature
             .iter()
             .map(|kappa| emax.min(2. * amax / kappa.abs()))

@@ -97,6 +97,8 @@ in
   # LSP TODO: hovering on build.channel doesn't work (but autocomplete does, as long as the record is complete enough to parse)
   # LSP TODO: autocomplete for enum variants
 
-  shells = Rust & { build.channel = 'nightly, build.extraTargets = ["riscv32imc-unknown-none-elf"] },
+  shells = Rust & { build.channel = 'nightly, build.extraTargets = ["riscv32imc-unknown-none-elf"], build.buildComponents = [ 'rustc, 'cargo, 'rust-std, 'rust-src ] },
+
+  shells.build.packages.espflash = organist.import_nix "nixpkgs#cargo-espflash"
 }
   | organist.OrganistExpression
