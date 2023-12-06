@@ -3,5 +3,10 @@
 resolver = "2"
 members = [ "crates/bradipous-curves",
   "crates/bradipous-geom",
-  "crates/bradipous-planner", "embedded/bradipograph",
+  "crates/bradipous-planner",
 ]
+
+exclude = [ "embedded/bradipograph" ]
+
+[workspace.dependencies]
+kurbo = { git = "https://github.com/jneem/kurbo", branch = "no-alloc", default-features = false }

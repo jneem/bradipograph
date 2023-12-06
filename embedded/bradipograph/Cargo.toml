@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bleps = { git = "https://github.com/bjoernQ/bleps", version = "0.1.0", features = ["async", "mtu256", "macros"] }
+bradipous-geom = { path = "../../crates/bradipous-geom", default-features = false }
 embassy-executor = { version = "=0.3.2", features = ["nightly", "executor-thread", "arch-riscv32"] }
 embassy-sync = "0.4.0"
 embassy-time = { version = "0.1.5", features = ["generic-queue-8"] }
@@ -14,6 +15,9 @@ esp-backtrace = { version = "0.9.0", features = ["esp32c3", "esp-println", "prin
 esp-println = { version = "0.7.1", default-features = false, features = ["esp32c3"] }
 esp-wifi = { version = "0.1.1", default-features = false, features = ["ble", "esp32c3", "async"] }
 esp32c3-hal = { version = "0.13.0", features = ["embassy", "embassy-time-timg0", "async"] }
+espilepsy = "0.1.2"
 futures = { version = "0.3.29", default-features = false }
 num-derive = { version = "0.4.1", default-features = false }
 num-traits = { version = "0.2.17", default-features = false }
+postcard = "1.0.8"
+serde = { version = "1.0.193", default-features = false, features = ["derive"] }

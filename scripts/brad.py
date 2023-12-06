@@ -1,6 +1,6 @@
 import asyncio
 import time
-#import sys, tty, termios
+import sys, tty, termios
 
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakDBusError
@@ -36,22 +36,30 @@ async def main():
     print(f"Found bradiograph at address {address}")
     
     async with BleakClient(address) as client:
-        while True:
-            key = input()
-            if len(key) != 1:
-                print(f"invalid input: `{key}`")
-                continue
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        
+        try:
+            while True:
+                key = sys.stdin.read(1)
+                if len(key) != 1:
+                    print(f"invalid input: `{key}`")
+                    continue
 
-            cmd = None
-            if key == 'd':
-                cmd = 0
-            elif key == 'f':
-                cmd = 1
-            elif key == 'k':
-                cmd = 3
-            elif key == 'j':
-                cmd = 4
-            await client.write_gatt_char(MANUAL_CONTROL_UUID, bytes([cmd]), response=False)
+                cmd = None
+                if key == 'd':
+                    cmd = 0
+                elif key == 'f':
+                    cmd = 1
+                elif key == 'k':
+                    cmd = 3
+                elif key == 'j':
+                    cmd = 4
+                if cmd is not None:
+                    await client.write_gatt_char(MANUAL_CONTROL_UUID, bytes([cmd]), response=False)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 asyncio.run(main())
