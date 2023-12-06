@@ -96,12 +96,12 @@ pub struct Curve<const CAP: usize> {
 }
 
 impl<const CAP: usize> Curve<CAP> {
-    pub fn extend(&mut self, path: &kurbo::BezPath) -> Result<(), ()> {
-        let PathEl::MoveTo(start_point) = path.elements().first().ok_or(())? else {
+    pub fn extend(&mut self, path: &[PathEl]) -> Result<(), ()> {
+        let PathEl::MoveTo(start_point) = path.first().ok_or(())? else {
             panic!("invalid bez path");
         };
 
-        for el in path.elements() {
+        for el in path {
             let el = match *el {
                 PathEl::ClosePath => PathEl::MoveTo(*start_point),
                 x => x,

@@ -9,5 +9,5 @@ std = []
 
 [dependencies]
 heapless = { version = "0.8.0", features = ["serde"] }
-kurbo = { version = "0.10.4", default-features = false, features = ["libm"] }
+kurbo = { workspace = true, default-features = false, features = ["libm"] }
 libm = "0.2.8"

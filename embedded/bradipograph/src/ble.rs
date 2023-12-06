@@ -10,20 +10,18 @@ use esp32c3_hal::peripherals::BT;
 use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
 use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
+use serde::{Deserialize, Serialize};
 
 // TODO: define these in a shared crate
 // const UUID: &str = "68a79627-2609-4569-8d7d-3b29fde28877";
 // const MANUAL_CONTROL_UUID: &str = "68a79628-2609-4569-8d7d-3b29fde28877";
 
-pub type CmdReceiver =
-    embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, ManualControl, 16>;
-pub type CmdSender =
-    embassy_sync::channel::Sender<'static, CriticalSectionRawMutex, ManualControl, 16>;
-pub type CmdChannel = embassy_sync::channel::Channel<CriticalSectionRawMutex, ManualControl, 16>;
+pub type CmdReceiver = embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, Cmd, 16>;
+pub type CmdSender = embassy_sync::channel::Sender<'static, CriticalSectionRawMutex, Cmd, 16>;
+pub type CmdChannel = embassy_sync::channel::Channel<CriticalSectionRawMutex, Cmd, 16>;
 
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, Serialize, Deserialize)]
 pub enum ManualControl {
     ShortenLeft,
     LengthenLeft,
@@ -31,6 +29,18 @@ pub enum ManualControl {
     ShortenRight,
     LengthenRight,
     StopRight,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Calibration {
+    MarkLeft,
+    Finish { y_offset: f32, x_offset: f32 },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Cmd {
+    Manual(ManualControl),
+    Calibrate(Calibration),
 }
 
 #[embassy_executor::task]
@@ -52,20 +62,16 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
         .unwrap();
         ble.cmd_set_le_advertise_enable(true).await.unwrap();
 
-        let mut manual_control = |_offset: usize, data: &[u8]| {
-            if let [x] = data {
-                if let Some(cmd) = ManualControl::from_u8(*x) {
+        let mut manual_control =
+            |_offset: usize, data: &[u8]| match postcard::from_bytes::<Cmd>(data) {
+                Ok(cmd) => {
                     println!("got command {cmd:?}");
-                    if cmds.try_send(cmd).is_err() {
+                    if let Err(cmd) = cmds.try_send(cmd) {
                         println!("dropped command {cmd:?}");
                     }
-                } else {
-                    println!("error: expected a manual command, got {x}");
                 }
-            } else {
-                println!("error: expected length 1, got {data:?}");
-            }
-        };
+                Err(e) => println!("error: failed to deserialize command {data:?}: {e}"),
+            };
 
         // TODO: make a builder pattern that allows us to make these without requiring literal uuids
         bleps::gatt!([service {

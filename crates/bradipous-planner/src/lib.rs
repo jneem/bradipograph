@@ -4,9 +4,10 @@ use arclen::{bendiness, inv_bendiness};
 use bradipous_curves::{Curve, CurveRef};
 use heapless::Vec;
 use kurbo::{
-    BezPath, CubicBez, Line, ParamCurve, ParamCurveArclen, ParamCurveCurvature, PathEl, PathSeg,
-    Point, QuadBez, Vec2,
+    CubicBez, Line, ParamCurve, ParamCurveArclen, ParamCurveCurvature, PathEl, PathSeg, Point,
+    QuadBez, Vec2,
 };
+use libm::{fabs, sqrt};
 
 mod arclen;
 
@@ -124,7 +125,7 @@ impl<'a, I: Iterator<Item = PathSeg>> Iterator for TakeWhileSmooth<'a, I> {
                 prev_tangent.length_squared() < 1e-3 || start_tangent.length_squared() < 1e-3;
 
             // If the tangents aren't approximately parallel, it's a corner.
-            is_corner |= prev_tangent.cross(start_tangent).abs()
+            is_corner |= fabs(prev_tangent.cross(start_tangent))
                 < self.accuracy * prev_tangent.length() * start_tangent.length();
 
             // If the tangents are pointing in opposite directions, it's a corner.
@@ -254,7 +255,7 @@ impl<const CAP: usize> Energizer<CAP> {
         let curvature: Vec<_, CAP> = path.curvatures(time.iter().cloned()).collect();
         let energy = curvature
             .iter()
-            .map(|kappa| emax.min(2. * amax / kappa.abs()))
+            .map(|kappa| emax.min(2. * amax / fabs(*kappa)))
             .collect();
 
         Self {
@@ -279,7 +280,7 @@ impl<const CAP: usize> Energizer<CAP> {
             .skip(1)
             .zip(&self.increments)
         {
-            let deriv_bound = (square(self.amax) - square(last * curvature) / 4.).sqrt();
+            let deriv_bound = sqrt(square(self.amax) - square(last * curvature) / 4.);
             *energy_bound = energy_bound.min(last + increment * deriv_bound);
             last = *energy_bound;
         }
@@ -294,7 +295,7 @@ impl<const CAP: usize> Energizer<CAP> {
         for ((energy_bound, curvature), increment) in
             energies.zip(curvatures).skip(1).zip(increments)
         {
-            let deriv_bound = (square(self.amax) - square(last * curvature) / 4.).sqrt();
+            let deriv_bound = sqrt(square(self.amax) - square(last * curvature) / 4.);
             *energy_bound = energy_bound.min(last + increment * deriv_bound);
             last = *energy_bound;
         }

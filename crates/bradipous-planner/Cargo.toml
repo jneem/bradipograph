@@ -9,9 +9,10 @@ std = ["bradipous-curves/std"]
 
 [dependencies]
 heapless = { version = "0.8.0", features = ["serde"] }
-kurbo = { version = "0.10.4", features = ["serde"] }
+kurbo = { workspace = true, default-features = false, features = ["serde", "libm"] }
 serde = { version = "1.0.190", default-features = false, features = ["derive"] }
 bradipous-curves = { path = "../bradipous-curves", default-features = false }
+libm = "0.2.8"
 
 [dev-dependencies]
 anyhow = "1.0.75"

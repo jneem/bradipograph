@@ -80,17 +80,25 @@ impl ConfigBuilder {
 
     /// Hanging calibration works like this: the claws are positioned an unknown
     /// distance apart (perfectly horizontal from one another). We manually
-    /// position the head directly below one claw and measure the distance to
-    /// that claw. Then we manually position the head the exact same distance
-    /// below the other claw. We record the change in the arm lengths when moving
-    /// from one of these positions to the other (by symmetry, it should be the
-    /// same for both arms).
+    /// position the head at a known position relative to the left claw, and
+    /// then move it to the symmetric position relative to the right claw.
+    /// We record the change in the arm lengths when moving from one of these
+    /// positions to the other (by symmetry, it should be the same for both
+    /// arms).
     ///
-    /// `hang` is the distance that the head was hanging below the claws, and
+    /// `hang` is the distance that the head was hanging below the claws, `x_offset`
+    /// is the distance that the head was to the side of the claws, and
     /// `arm_change` is the change in arm lengths when moving from one hanging
     /// position to the other.
-    pub fn with_hanging_calibration(&mut self, hang: f64, arm_change: f64) -> &mut Self {
-        self.claw_distance = sqrt(square(arm_change) + 2.0 * arm_change * hang);
+    pub fn with_hanging_calibration(
+        &mut self,
+        hang: f64,
+        x_offset: f64,
+        arm_change: f64,
+    ) -> &mut Self {
+        let a = sqrt(square(hang) + square(x_offset));
+        self.claw_distance =
+            x_offset + sqrt(square(x_offset) + square(arm_change) + 2.0 * arm_change * a);
         self
     }
 

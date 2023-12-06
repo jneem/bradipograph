@@ -2,21 +2,24 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use ble::{ble_task, CmdChannel, CmdReceiver, ManualControl};
+use ble::{ble_task, Calibration, Cmd, CmdChannel, CmdReceiver, ManualControl};
 use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, Timer};
 use embedded_hal::digital::v2::PinState;
 use esp32c3_hal::{
-    clock::ClockControl,
+    clock::{ClockControl, Clocks},
     embassy,
+    gpio::{GpioPin, Output, PushPull},
     peripherals::Peripherals,
     prelude::*,
+    rmt::{Channel0, TxChannelCreator},
     systimer::{self, SystemTimer},
     timer::TimerGroup,
-    Rng, IO,
+    Rmt, Rng, IO,
 };
 use esp_backtrace as _;
+use espilepsy::Color;
 use futures::{future::Either, FutureExt};
 
 mod ble;
@@ -26,17 +29,6 @@ use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitFor};
 use stepper::{Direction, Stepper};
 
-macro_rules! singleton {
-    ($val:expr, $T:ty) => {{
-        static STATIC_CELL: ::static_cell::StaticCell<$T> = ::static_cell::StaticCell::new();
-        STATIC_CELL.init($val)
-    }};
-    ($val:expr) => {{
-        static STATIC_CELL: ::static_cell::StaticCell<_> = ::static_cell::StaticCell::new();
-        STATIC_CELL.init($val)
-    }};
-}
-
 pub type Channel<T, const N: usize> = embassy_sync::channel::Channel<CriticalSectionRawMutex, T, N>;
 pub type Sender<T, const N: usize> =
     embassy_sync::channel::Sender<'static, CriticalSectionRawMutex, T, N>;
@@ -45,6 +37,15 @@ pub type Receiver<T, const N: usize> =
 
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static STEPPER_CHANNEL: Channel<StepperCmd, 4> = Channel::new();
+static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::new();
+
+struct StepperPosition {
+    left: i32,
+    right: i32,
+}
+
+static POSITION: Mutex<CriticalSectionRawMutex, StepperPosition> =
+    Mutex::new(StepperPosition { left: 0, right: 0 });
 
 struct StepperCmd {
     left: bool,
@@ -59,7 +60,13 @@ fn soon() -> u64 {
     SystemTimer::now() + SystemTimer::TICKS_PER_SECOND
 }
 
-async fn stepper_task(cmds: CmdReceiver, mut left: Stepper, mut right: Stepper) {
+static MANUAL_CONTROL_CHANNEL: Channel<Option<ManualControl>, 16> = Channel::new();
+#[embassy_executor::task]
+async fn manual_control(
+    cmds: Receiver<Option<ManualControl>, 16>,
+    mut left: Stepper,
+    mut right: Stepper,
+) {
     struct StepperState {
         dir: Option<Direction>,
         timeout: u64,
@@ -117,12 +124,13 @@ async fn stepper_task(cmds: CmdReceiver, mut left: Stepper, mut right: Stepper) 
     };
 
     loop {
-        println!("steppers idle");
         while state.is_idle() {
-            state.apply(cmds.receive().await);
+            match cmds.receive().await {
+                Some(cmd) => state.apply(cmd),
+                None => break,
+            }
         }
 
-        println!("steppers moving");
         while !state.is_idle() {
             if let Some(dir) = state.left.dir {
                 left.step(dir);
@@ -133,30 +141,27 @@ async fn stepper_task(cmds: CmdReceiver, mut left: Stepper, mut right: Stepper) 
 
             let now = now();
             if now >= state.left.timeout {
-                if state.left.dir.is_some() {
-                    println!(
-                        "marking left as idle, now {now}, timeout {}",
-                        state.left.timeout
-                    );
-                }
                 state.left.dir = None;
             }
             if now >= state.right.timeout {
-                if state.right.dir.is_some() {
-                    println!(
-                        "marking right as idle, now {now}, timeout {}",
-                        state.right.timeout
-                    );
-                }
                 state.right.dir = None;
             }
 
             match futures::future::select(cmds.receive(), Timer::after_millis(4)).await {
-                Either::Left((cmd, _)) => state.apply(cmd),
+                Either::Left((Some(cmd), _)) => state.apply(cmd),
+                Either::Left((None, _)) => break,
                 Either::Right(_) => {}
             }
         }
     }
+}
+
+#[embassy_executor::task]
+async fn led_task(
+    rmt_channel: Channel0<0>,
+    recv: espilepsy::CmdReceiver<'static, CriticalSectionRawMutex>,
+) {
+    espilepsy::task(rmt_channel, recv).await;
 }
 
 #[main]
@@ -178,6 +183,28 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(ble_task(init, peripherals.BT, CMD_CHANNEL.sender()));
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
+    let rmt = Rmt::new(peripherals.RMT, 80u32.MHz(), &clocks).unwrap();
+    let rmt_channel = rmt
+        .channel0
+        .configure(
+            io.pins.gpio7,
+            esp32c3_hal::rmt::TxChannelConfig {
+                clk_divider: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    spawner.must_spawn(led_task(rmt_channel, LED_CHANNEL.receiver()));
+
+    LED_CHANNEL
+        .send(espilepsy::Cmd::Blinky {
+            color0: Color { r: 0, g: 0, b: 0 },
+            color1: Color { r: 32, g: 0, b: 0 },
+            period: Duration::from_secs(1),
+        })
+        .await;
+
     let left = Stepper::new(
         io.pins.gpio0.into_push_pull_output(),
         io.pins.gpio1.into_push_pull_output(),
@@ -191,16 +218,26 @@ async fn main(spawner: Spawner) {
         io.pins.gpio10.into_push_pull_output(),
     );
 
-    stepper_task(CMD_CHANNEL.receiver(), left, right).await;
+    spawner.must_spawn(manual_control(
+        MANUAL_CONTROL_CHANNEL.receiver(),
+        left,
+        right,
+    ));
 
     loop {
-        // for _ in 0..2038 / 4 {
-        //     stepper.step(Direction::Up);
-        //     Timer::after_millis(2).await;
-        // }
-        // for _ in 0..2038 / 4 {
-        //     stepper.step(Direction::Down);
-        //     Timer::after_millis(2).await;
-        // }
+        match CMD_CHANNEL.receive().await {
+            Cmd::Manual(m) => {
+                MANUAL_CONTROL_CHANNEL.send(Some(m)).await;
+            }
+            Cmd::Calibrate(Calibration::MarkLeft) => {
+                let mut lock = POSITION.lock().await;
+                lock.left = 0;
+                lock.right = 0;
+            }
+            Cmd::Calibrate(Calibration::Finish { y_offset, x_offset }) => {
+                MANUAL_CONTROL_CHANNEL.send(None).await;
+            } // TODO: how best to manage ownership of the steppers between the calibration
+              // mode and the other mode?
+        }
     }
 }

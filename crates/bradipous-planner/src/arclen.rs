@@ -2,6 +2,7 @@ use kurbo::{
     common::{GAUSS_LEGENDRE_COEFFS_16, GAUSS_LEGENDRE_COEFFS_24, GAUSS_LEGENDRE_COEFFS_8},
     CubicBez, ParamCurve, ParamCurveArclen, ParamCurveCurvature, ParamCurveDeriv,
 };
+use libm::{fabs, sqrt};
 
 use crate::{Transform, TransformedCurve};
 
@@ -90,6 +91,14 @@ impl<T: Transform + Clone> ParamCurveDeriv for DerivTransformedCurve<T> {
 
 impl<T: Transform + Clone> ParamCurveCurvature for TransformedCurve<T> {}
 
+fn powi(x: f64, n: u8) -> f64 {
+    let mut ret = x;
+    for _ in 1..n {
+        ret *= x;
+    }
+    ret
+}
+
 fn arclen_rec<T: Transform + Clone>(
     c: &CubicBez,
     transform: &T,
@@ -123,15 +132,15 @@ fn arclen_rec<T: Transform + Clone>(
         transform: transform.clone(),
         curve: *c,
     };
-    let est_gauss8_error = 4. * (est.powi(3) * 2.5e-6).min(3e-2) * lp_lc;
+    let est_gauss8_error = 4. * (powi(est, 3) * 2.5e-6).min(3e-2) * lp_lc;
     if est_gauss8_error < accuracy {
         return transformed.gauss_arclen(GAUSS_LEGENDRE_COEFFS_8);
     }
-    let est_gauss16_error = 4. * (est.powi(6) * 1.5e-11).min(9e-3) * lp_lc;
+    let est_gauss16_error = 4. * (powi(est, 6) * 1.5e-11).min(9e-3) * lp_lc;
     if est_gauss16_error < accuracy {
         return transformed.gauss_arclen(GAUSS_LEGENDRE_COEFFS_16);
     }
-    let est_gauss24_error = 4. * (est.powi(9) * 3.5e-16).min(3.5e-3) * lp_lc;
+    let est_gauss24_error = 4. * (powi(est, 9) * 3.5e-16).min(3.5e-3) * lp_lc;
     if est_gauss24_error < accuracy || depth >= 20 {
         return transformed.gauss_arclen(GAUSS_LEGENDRE_COEFFS_24);
     }
@@ -149,7 +158,7 @@ where
         .iter()
         .map(|(wi, xi)| {
             let t = 0.5 * (xi + 1.0); // Transform the interval from [-1, 1] to [0, 1]
-            wi * d.eval(t).to_vec2().hypot() * c.curvature(t).abs().sqrt()
+            wi * d.eval(t).to_vec2().hypot() * sqrt(fabs(c.curvature(t)))
         })
         .sum::<f64>()
         * 0.5

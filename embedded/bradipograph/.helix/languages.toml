@@ -5,3 +5,7 @@ checkOnSave.command = "clippy"
 # but maybe because there's no native target? Anyway, this removes the warnings.
 checkOnSave.allTargets = false
 checkOnSave.extraArgs = [ "--target", "riscv32imc-unknown-none-elf"]
+
+[[language]]
+name = "rust"
+roots = [".lsproot"]
