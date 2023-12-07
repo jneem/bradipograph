@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use core::f64::consts::PI;
+
 use bradipous_planner::Transform;
 use kurbo::{Point, Rect, Vec2};
 use libm::{sqrt, tan};
@@ -39,6 +41,11 @@ pub struct RotorAngles {
     pub right: Angle,
 }
 
+pub struct StepperPositions {
+    pub left: u32,
+    pub right: u32,
+}
+
 impl RotorAngles {
     pub fn to_point(&self) -> Point {
         Point {
@@ -54,6 +61,7 @@ pub struct ConfigBuilder {
     max_hang: f64,
     claw_distance: f64,
     spool_radius: f64,
+    steps_per_revolution: f64,
 }
 
 impl Default for ConfigBuilder {
@@ -63,6 +71,7 @@ impl Default for ConfigBuilder {
             max_hang: 100.0,
             claw_distance: 100.0,
             spool_radius: 2.0,
+            steps_per_revolution: 2036.0,
         }
     }
 }
@@ -74,6 +83,7 @@ impl ConfigBuilder {
             spool_radius: self.spool_radius,
             min_angle: self.min_angle,
             max_hang: self.max_hang,
+            steps_per_revolution: self.steps_per_revolution,
             hang_offset: self.claw_distance * tan(self.min_angle.radians()),
         }
     }
@@ -119,6 +129,7 @@ pub struct Config {
     pub spool_radius: f64,
     pub min_angle: Angle,
     pub max_hang: f64,
+    pub steps_per_revolution: f64,
 
     // Our smallest hang, determined by min_angle and claw_distance. We
     // offset our publicly-visible coordinates by this amount, so that
@@ -151,6 +162,21 @@ impl Config {
             left: Angle::from_radians(lengths.left / self.spool_radius),
             right: Angle::from_radians(lengths.right / self.spool_radius),
         }
+    }
+
+    pub fn stepper_steps(&self, angles: &RotorAngles) -> StepperPositions {
+        StepperPositions {
+            left: libm::round(angles.left.radians() / (2.0 * PI) * self.steps_per_revolution)
+                as u32,
+            right: libm::round(angles.right.radians() / (2.0 * PI) * self.steps_per_revolution)
+                as u32,
+        }
+    }
+
+    pub fn point_to_steps(&self, p: &Point) -> StepperPositions {
+        let arms = self.arm_lengths(p);
+        let angles = self.rotor_angles(&arms);
+        self.stepper_steps(&angles)
     }
 }
 
@@ -218,6 +244,7 @@ mod tests {
                     spool_radius: r,
                     min_angle: Angle::from_degrees(10.0),
                     max_hang: 100.0,
+                    steps_per_revolution: 2036.0,
                     hang_offset: h,
                 })
                 .boxed()

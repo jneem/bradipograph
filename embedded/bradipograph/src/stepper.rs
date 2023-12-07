@@ -1,10 +1,23 @@
 use embedded_hal::digital::v2::{OutputPin, PinState};
 use esp32c3_hal::gpio::{AnyPin, Output, PushPull};
 
+/// These directions are from the point of view of a person looking at the
+/// tip of the spinny part of the motor. The shaft, maybe? Anyway, if the
+/// bradipograph is hanging on the wall and you're standing back and watching it
+/// draw, these are the directions from your point of view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
-    Up,
-    Down,
+    Clockwise,
+    CounterClockwise,
+}
+
+impl Direction {
+    pub fn to_i32(self) -> i32 {
+        match self {
+            Direction::Clockwise => 1,
+            Direction::CounterClockwise => -1,
+        }
+    }
 }
 
 pub type AnyOutput = AnyPin<Output<PushPull>>;
@@ -38,7 +51,7 @@ impl Stepper {
     }
 
     pub fn step(&mut self, dir: Direction) {
-        let inc = if dir == Direction::Up { 1 } else { 3 };
+        let inc = if dir == Direction::Clockwise { 1 } else { 3 };
         self.state = (self.state + inc) % 4;
         self.apply_state();
     }

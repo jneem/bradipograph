@@ -41,6 +41,8 @@ pub enum Calibration {
 pub enum Cmd {
     Manual(ManualControl),
     Calibrate(Calibration),
+    // Temporary, to test calibration
+    MoveTo(f32, f32),
 }
 
 #[embassy_executor::task]

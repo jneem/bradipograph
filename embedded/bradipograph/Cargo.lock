@@ -143,6 +143,8 @@ dependencies = [
  "esp32c3-hal",
  "espilepsy",
  "futures",
+ "kurbo",
+ "libm",
  "num-derive 0.4.1",
  "num-traits",
  "postcard",

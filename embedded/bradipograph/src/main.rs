@@ -2,15 +2,13 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use ble::{ble_task, Calibration, Cmd, CmdChannel, CmdReceiver, ManualControl};
+use ble::{ble_task, Calibration, Cmd, CmdChannel, ManualControl};
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::{Duration, Instant, Timer};
-use embedded_hal::digital::v2::PinState;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_time::{Duration, Timer};
 use esp32c3_hal::{
-    clock::{ClockControl, Clocks},
+    clock::ClockControl,
     embassy,
-    gpio::{GpioPin, Output, PushPull},
     peripherals::Peripherals,
     prelude::*,
     rmt::{Channel0, TxChannelCreator},
@@ -19,14 +17,15 @@ use esp32c3_hal::{
     Rmt, Rng, IO,
 };
 use esp_backtrace as _;
+use esp_println::println;
 use espilepsy::Color;
-use futures::{future::Either, FutureExt};
+use futures::future::Either;
 
 mod ble;
 mod stepper;
 
-use esp_println::println;
-use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitFor};
+use esp_wifi::EspWifiInitFor;
+use kurbo::Point;
 use stepper::{Direction, Stepper};
 
 pub type Channel<T, const N: usize> = embassy_sync::channel::Channel<CriticalSectionRawMutex, T, N>;
@@ -36,20 +35,12 @@ pub type Receiver<T, const N: usize> =
     embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, T, N>;
 
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
-static STEPPER_CHANNEL: Channel<StepperCmd, 4> = Channel::new();
 static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::new();
 
+#[derive(Default)]
 struct StepperPosition {
     left: i32,
     right: i32,
-}
-
-static POSITION: Mutex<CriticalSectionRawMutex, StepperPosition> =
-    Mutex::new(StepperPosition { left: 0, right: 0 });
-
-struct StepperCmd {
-    left: bool,
-    dir: Direction,
 }
 
 fn now() -> u64 {
@@ -60,18 +51,65 @@ fn soon() -> u64 {
     SystemTimer::now() + SystemTimer::TICKS_PER_SECOND
 }
 
-static MANUAL_CONTROL_CHANNEL: Channel<Option<ManualControl>, 16> = Channel::new();
-#[embassy_executor::task]
-async fn manual_control(
-    cmds: Receiver<Option<ManualControl>, 16>,
-    mut left: Stepper,
-    mut right: Stepper,
+async fn calibrated_control(
+    cmds: Receiver<Cmd, 16>,
+    left: &mut Stepper,
+    right: &mut Stepper,
+    config: bradipous_geom::Config,
+    init_pos: Point,
 ) {
+    let mut steps = config.point_to_steps(&init_pos);
+    loop {
+        match cmds.receive().await {
+            Cmd::MoveTo(x, y) => {
+                let target_steps = config.point_to_steps(&Point::new(x as f64, y as f64));
+                let mut right_count = target_steps.right.abs_diff(steps.right);
+                let mut left_count = target_steps.left.abs_diff(steps.left);
+                let right_dir = if target_steps.right > steps.right {
+                    Direction::Clockwise
+                } else {
+                    Direction::CounterClockwise
+                };
+                let left_dir = if target_steps.left > steps.left {
+                    Direction::CounterClockwise
+                } else {
+                    Direction::Clockwise
+                };
+
+                while right_count != 0 && left_count != 0 {
+                    if left_count > 0 {
+                        left.step(left_dir);
+                        left_count -= 1;
+                    }
+                    if right_count > 0 {
+                        right.step(right_dir);
+                        right_count -= 1;
+                    }
+                    Timer::after_millis(2).await;
+                }
+
+                steps = target_steps;
+            }
+            _ => {
+                println!("unexpected cmd in calibrated mode");
+                continue;
+            }
+        }
+    }
+}
+
+async fn manual_control(
+    cmds: Receiver<Cmd, 16>,
+    left: &mut Stepper,
+    right: &mut Stepper,
+) -> (bradipous_geom::Config, kurbo::Point) {
+    #[derive(Default)]
     struct StepperState {
         dir: Option<Direction>,
         timeout: u64,
     }
 
+    #[derive(Default)]
     struct State {
         left: StepperState,
         right: StepperState,
@@ -83,19 +121,19 @@ async fn manual_control(
             let timeout = soon();
             match cmd {
                 ManualControl::ShortenLeft => {
-                    self.left.dir = Some(Direction::Up);
+                    self.left.dir = Some(Direction::Clockwise);
                     self.left.timeout = timeout;
                 }
                 ManualControl::LengthenLeft => {
-                    self.left.dir = Some(Direction::Down);
+                    self.left.dir = Some(Direction::CounterClockwise);
                     self.left.timeout = timeout;
                 }
                 ManualControl::ShortenRight => {
-                    self.right.dir = Some(Direction::Up);
+                    self.right.dir = Some(Direction::CounterClockwise);
                     self.right.timeout = timeout;
                 }
                 ManualControl::LengthenRight => {
-                    self.right.dir = Some(Direction::Down);
+                    self.right.dir = Some(Direction::Clockwise);
                     self.right.timeout = timeout;
                 }
                 ManualControl::StopLeft => {
@@ -112,31 +150,37 @@ async fn manual_control(
         }
     }
 
-    let mut state = State {
-        left: StepperState {
-            dir: None,
-            timeout: 0,
-        },
-        right: StepperState {
-            dir: None,
-            timeout: 0,
-        },
-    };
+    let mut state = State::default();
+    let mut position = StepperPosition::default();
 
-    loop {
-        while state.is_idle() {
-            match cmds.receive().await {
-                Some(cmd) => state.apply(cmd),
-                None => break,
+    let mut pending_cmd = cmds.receive().await;
+    let (y_offset, x_offset) = 'calibrate: loop {
+        loop {
+            match pending_cmd {
+                Cmd::Manual(cmd) => state.apply(cmd),
+                Cmd::Calibrate(Calibration::MarkLeft) => {
+                    position.left = 0;
+                    position.right = 0;
+                }
+                Cmd::Calibrate(Calibration::Finish { y_offset, x_offset }) => {
+                    break 'calibrate (y_offset, x_offset);
+                }
+                _ => println!("unexpected command in manual mode"),
             }
+            if state.is_idle() {
+                break;
+            }
+            pending_cmd = cmds.receive().await;
         }
 
         while !state.is_idle() {
             if let Some(dir) = state.left.dir {
                 left.step(dir);
+                position.left += dir.to_i32();
             }
             if let Some(dir) = state.right.dir {
                 right.step(dir);
+                position.right += dir.to_i32();
             }
 
             let now = now();
@@ -147,13 +191,34 @@ async fn manual_control(
                 state.right.dir = None;
             }
 
-            match futures::future::select(cmds.receive(), Timer::after_millis(4)).await {
-                Either::Left((Some(cmd), _)) => state.apply(cmd),
-                Either::Left((None, _)) => break,
+            match futures::future::select(cmds.receive(), Timer::after_millis(2)).await {
+                Either::Left((Cmd::Manual(cmd), _)) => state.apply(cmd),
+                Either::Left((other, _)) => {
+                    // Force us to idle (which will break the `while` loop)
+                    state = State::default();
+                    pending_cmd = other;
+                }
                 Either::Right(_) => {}
             }
         }
-    }
+    };
+
+    let config = bradipous_geom::ConfigBuilder::default()
+        .with_hanging_calibration(
+            y_offset as f64,
+            x_offset as f64,
+            ((position.left.abs() + position.right.abs()) / 2) as f64,
+        )
+        .build();
+
+    // The current position should be y_offset cm below the right claw and x_offset cm
+    // to its left.
+    let pos = kurbo::Point::new(
+        config.claw_distance / 2.0 - x_offset as f64,
+        y_offset as f64 - config.max_hang,
+    );
+
+    (config, pos)
 }
 
 #[embassy_executor::task]
@@ -205,39 +270,19 @@ async fn main(spawner: Spawner) {
         })
         .await;
 
-    let left = Stepper::new(
+    let mut right = Stepper::new(
         io.pins.gpio0.into_push_pull_output(),
         io.pins.gpio1.into_push_pull_output(),
         io.pins.gpio2.into_push_pull_output(),
         io.pins.gpio3.into_push_pull_output(),
     );
-    let right = Stepper::new(
+    let mut left = Stepper::new(
         io.pins.gpio4.into_push_pull_output(),
         io.pins.gpio5.into_push_pull_output(),
         io.pins.gpio8.into_push_pull_output(),
         io.pins.gpio10.into_push_pull_output(),
     );
 
-    spawner.must_spawn(manual_control(
-        MANUAL_CONTROL_CHANNEL.receiver(),
-        left,
-        right,
-    ));
-
-    loop {
-        match CMD_CHANNEL.receive().await {
-            Cmd::Manual(m) => {
-                MANUAL_CONTROL_CHANNEL.send(Some(m)).await;
-            }
-            Cmd::Calibrate(Calibration::MarkLeft) => {
-                let mut lock = POSITION.lock().await;
-                lock.left = 0;
-                lock.right = 0;
-            }
-            Cmd::Calibrate(Calibration::Finish { y_offset, x_offset }) => {
-                MANUAL_CONTROL_CHANNEL.send(None).await;
-            } // TODO: how best to manage ownership of the steppers between the calibration
-              // mode and the other mode?
-        }
-    }
+    let (config, pos) = manual_control(CMD_CHANNEL.receiver(), &mut left, &mut right).await;
+    calibrated_control(CMD_CHANNEL.receiver(), &mut left, &mut right, config, pos).await;
 }

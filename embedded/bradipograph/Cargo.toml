@@ -17,6 +17,8 @@ esp-wifi = { version = "0.1.1", default-features = false, features = ["ble", "es
 esp32c3-hal = { version = "0.13.0", features = ["embassy", "embassy-time-timg0", "async"] }
 espilepsy = "0.1.2"
 futures = { version = "0.3.29", default-features = false }
+kurbo = { git = "https://github.com/jneem/kurbo", branch = "no-alloc", default-features = false }
+libm = "0.2.8"
 num-derive = { version = "0.4.1", default-features = false }
 num-traits = { version = "0.2.17", default-features = false }
 postcard = "1.0.8"
