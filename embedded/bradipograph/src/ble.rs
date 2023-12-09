@@ -9,41 +9,16 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp32c3_hal::peripherals::BT;
 use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
-use num_derive::FromPrimitive;
-use serde::{Deserialize, Serialize};
 
 // TODO: define these in a shared crate
 // const UUID: &str = "68a79627-2609-4569-8d7d-3b29fde28877";
 // const MANUAL_CONTROL_UUID: &str = "68a79628-2609-4569-8d7d-3b29fde28877";
 
-pub type CmdReceiver = embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, Cmd, 16>;
+//pub type CmdReceiver = embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, Cmd, 16>;
 pub type CmdSender = embassy_sync::channel::Sender<'static, CriticalSectionRawMutex, Cmd, 16>;
 pub type CmdChannel = embassy_sync::channel::Channel<CriticalSectionRawMutex, Cmd, 16>;
 
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, Serialize, Deserialize)]
-pub enum ManualControl {
-    ShortenLeft,
-    LengthenLeft,
-    StopLeft,
-    ShortenRight,
-    LengthenRight,
-    StopRight,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Calibration {
-    MarkLeft,
-    Finish { y_offset: f32, x_offset: f32 },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Cmd {
-    Manual(ManualControl),
-    Calibrate(Calibration),
-    // Temporary, to test calibration
-    MoveTo(f32, f32),
-}
+use bradipous_protocol::Cmd;
 
 #[embassy_executor::task]
 pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: CmdSender) {

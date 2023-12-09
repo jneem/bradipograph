@@ -27,7 +27,9 @@
       in
       {
         devShell = pkgs.mkShell {
+          buildInputs = [ pkgs.pkg-config ];
           nativeBuildInputs = with pkgs; [
+            dbus
             rust-toolchain
             python-toolchain
             cargo-espflash

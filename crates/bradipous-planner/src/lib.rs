@@ -30,17 +30,17 @@ impl<const CAP: usize> MotionCurve<CAP> {
         path: &Curve<C>,
         config: &PlannerConfig,
         transform: &impl Transform,
-    ) -> Self {
+    ) -> Option<Self> {
         let mut ret = MotionCurve {
             points: Vec::new(),
             energies: Vec::new(),
         };
 
         for seg in path.subcurves() {
-            ret.append_smooth_path(seg, config, transform);
+            ret.append_smooth_path(seg, config, transform)?;
         }
 
-        ret
+        Some(ret)
     }
 
     fn append_smooth_path(
@@ -48,7 +48,7 @@ impl<const CAP: usize> MotionCurve<CAP> {
         path: CurveRef<'_>,
         config: &PlannerConfig,
         transform: &impl Transform,
-    ) {
+    ) -> Option<()> {
         let transformed_path = TransformedPath { path, transform };
 
         let plan = Energizer::<CAP>::plan(
@@ -59,9 +59,11 @@ impl<const CAP: usize> MotionCurve<CAP> {
             config.max_acceleration,
         );
 
+        // TODO: panics if not enough capacity
         self.points
             .extend(transformed_path.evals(plan.time.iter().copied()));
-        self.energies.extend_from_slice(&plan.energy);
+        self.energies.extend_from_slice(&plan.energy).ok()?;
+        Some(())
     }
 }
 
@@ -97,56 +99,6 @@ impl<'a> Subpath<'a> {
         kurbo::segments(
             core::iter::once(PathEl::MoveTo(self.start)).chain(self.path.iter().cloned()),
         )
-    }
-}
-
-struct TakeWhileSmooth<'a, I: Iterator> {
-    segs: &'a mut core::iter::Peekable<I>,
-    prev_tangent: Option<Vec2>,
-    accuracy: f64,
-}
-
-impl<'a, I: Iterator<Item = PathSeg>> Iterator for TakeWhileSmooth<'a, I> {
-    type Item = PathSeg;
-
-    fn next(&mut self) -> Option<PathSeg> {
-        let next_seg = self.segs.peek()?;
-        let (start_tangent, end_tangent) = match next_seg {
-            kurbo::PathSeg::Line(ell) => (ell.p1 - ell.p0, ell.p1 - ell.p0),
-            kurbo::PathSeg::Quad(q) => (q.p1 - q.p0, q.p2 - q.p1),
-            kurbo::PathSeg::Cubic(c) => (c.p1 - c.p0, c.p2 - c.p1),
-        };
-
-        if let Some(prev_tangent) = self.prev_tangent {
-            // If one of the tangents is close to zero, say that they aren't parallel. This
-            // might be a false positive, but it saves us from having to consider the next
-            // derivative.
-            let mut is_corner =
-                prev_tangent.length_squared() < 1e-3 || start_tangent.length_squared() < 1e-3;
-
-            // If the tangents aren't approximately parallel, it's a corner.
-            is_corner |= fabs(prev_tangent.cross(start_tangent))
-                < self.accuracy * prev_tangent.length() * start_tangent.length();
-
-            // If the tangents are pointing in opposite directions, it's a corner.
-            is_corner |= prev_tangent.dot(start_tangent) <= 0.;
-
-            if is_corner {
-                return None;
-            }
-        }
-        self.prev_tangent = Some(end_tangent);
-        self.segs.next()
-    }
-}
-
-impl<'a, I: Iterator<Item = PathSeg>> TakeWhileSmooth<'a, I> {
-    pub fn new(iter: &'a mut core::iter::Peekable<I>, accuracy: f64) -> Self {
-        Self {
-            segs: iter,
-            prev_tangent: None,
-            accuracy,
-        }
     }
 }
 
@@ -319,8 +271,8 @@ pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
     increment: f64,
     times: &mut Vec<PathTime, CAP>,
     increments: &mut Vec<f64, CAP>,
-) {
-    times.push(PathTime::new(0, 0.0));
+) -> Option<()> {
+    times.push(PathTime::new(0, 0.0)).ok()?;
 
     let mut bend_accumulated = 0.0;
     let mut arclen_accumulated = 0.0;
@@ -345,8 +297,8 @@ pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
             bend_accumulated += bend_step;
             arclen_accumulated += transformed.subsegment(prev_t..t).arclen(1e-6);
             if bend_accumulated >= 0.99 * increment {
-                times.push(PathTime::new(idx, t));
-                increments.push(arclen_accumulated);
+                times.push(PathTime::new(idx, t)).ok()?;
+                increments.push(arclen_accumulated).ok()?;
                 bend_accumulated = 0.0;
                 arclen_accumulated = 0.0;
             }
@@ -361,7 +313,9 @@ pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
 
     if arclen_accumulated > 1e-3 {
         let idx = path.path.segments().count() - 1;
-        times.push(PathTime::new(idx, 1.0));
-        increments.push(arclen_accumulated);
+        times.push(PathTime::new(idx, 1.0)).ok()?;
+        increments.push(arclen_accumulated).ok()?;
     }
+
+    Some(())
 }

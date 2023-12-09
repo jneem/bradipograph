@@ -132,6 +132,7 @@ version = "0.1.0"
 dependencies = [
  "bleps",
  "bradipous-geom",
+ "bradipous-protocol",
  "embassy-executor",
  "embassy-sync 0.4.0",
  "embassy-time",
@@ -177,6 +178,13 @@ dependencies = [
  "heapless 0.8.0",
  "kurbo",
  "libm",
+ "serde",
+]
+
+[[package]]
+name = "bradipous-protocol"
+version = "0.1.0"
+dependencies = [
  "serde",
 ]
 

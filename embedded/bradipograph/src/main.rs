@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use ble::{ble_task, Calibration, Cmd, CmdChannel, ManualControl};
+use bradipous_protocol::{Calibration, Cmd, ManualControl};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Duration, Timer};
@@ -18,15 +18,16 @@ use esp32c3_hal::{
 };
 use esp_backtrace as _;
 use esp_println::println;
+use esp_wifi::EspWifiInitFor;
 use espilepsy::Color;
 use futures::future::Either;
+use kurbo::Point;
+use stepper::{Direction, Stepper};
 
 mod ble;
 mod stepper;
 
-use esp_wifi::EspWifiInitFor;
-use kurbo::Point;
-use stepper::{Direction, Stepper};
+use ble::{ble_task, CmdChannel};
 
 pub type Channel<T, const N: usize> = embassy_sync::channel::Channel<CriticalSectionRawMutex, T, N>;
 pub type Sender<T, const N: usize> =
