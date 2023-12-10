@@ -104,13 +104,13 @@ async fn manual_control(
     left: &mut Stepper,
     right: &mut Stepper,
 ) -> (bradipous_geom::Config, kurbo::Point) {
-    #[derive(Default)]
+    #[derive(Default, Debug)]
     struct StepperState {
         dir: Option<Direction>,
         timeout: u64,
     }
 
-    #[derive(Default)]
+    #[derive(Default, Debug)]
     struct State {
         left: StepperState,
         right: StepperState,
@@ -154,11 +154,18 @@ async fn manual_control(
     let mut state = State::default();
     let mut position = StepperPosition::default();
 
-    let mut pending_cmd = cmds.receive().await;
+    let mut pending_cmd = Some(cmds.receive().await);
     let (y_offset, x_offset) = 'calibrate: loop {
         loop {
-            match pending_cmd {
-                Cmd::Manual(cmd) => state.apply(cmd),
+            let cmd = match pending_cmd.take() {
+                Some(c) => c,
+                None => cmds.receive().await,
+            };
+
+            match cmd {
+                Cmd::Manual(cmd) => {
+                    state.apply(cmd);
+                }
                 Cmd::Calibrate(Calibration::MarkLeft) => {
                     position.left = 0;
                     position.right = 0;
@@ -168,10 +175,9 @@ async fn manual_control(
                 }
                 _ => println!("unexpected command in manual mode"),
             }
-            if state.is_idle() {
+            if !state.is_idle() {
                 break;
             }
-            pending_cmd = cmds.receive().await;
         }
 
         while !state.is_idle() {
@@ -197,7 +203,7 @@ async fn manual_control(
                 Either::Left((other, _)) => {
                     // Force us to idle (which will break the `while` loop)
                     state = State::default();
-                    pending_cmd = other;
+                    pending_cmd = Some(other);
                 }
                 Either::Right(_) => {}
             }

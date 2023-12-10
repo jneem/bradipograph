@@ -10,26 +10,15 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt as _;
 use uuid::Uuid;
 
-use bradipous_protocol::{Calibration, ManualControl};
+use bradipous_protocol::Cmd;
 
+#[derive(Debug)]
 pub enum Event {
     Found,
     Disconnected,
     Connected(Peripheral),
     Error(anyhow::Error),
-    Key(char),
-}
-
-#[derive(Debug)]
-pub enum Cmd {
-    Calibration(CalibrationCmd),
-}
-
-/// The commands that are valid when we're in calibration mode.
-#[derive(Debug)]
-pub enum CalibrationCmd {
-    Move(ManualControl),
-    Calib(Calibration),
+    Key(KeyCode),
 }
 
 const CONTROL_UUID: &str = "68a79628-2609-4569-8d7d-3b29fde28877";
@@ -41,9 +30,7 @@ pub fn init(cmds: mpsc::Receiver<Cmd>) -> impl Stream<Item = Event> + Unpin {
     let event_stream = EventStream::new().filter_map(|ev| {
         if let Ok(event::Event::Key(key)) = ev {
             if key.kind == event::KeyEventKind::Press {
-                if let KeyCode::Char(ch) = key.code {
-                    return Some(Event::Key(ch));
-                }
+                return Some(Event::Key(key.code));
             }
         }
         None
@@ -66,6 +53,8 @@ pub async fn ble_connection(
     adapter.start_scan(ScanFilter::default()).await?;
 
     'reconnect: loop {
+        // TODO: instead of continue 'reconnect all the time, factor out a function that returns and error
+        // when the connection is broken
         events.send(Event::Disconnected).unwrap();
 
         let peripheral;
@@ -115,17 +104,24 @@ pub async fn ble_connection(
             }
         };
 
+        let mut msg_buf = Vec::new();
         while let Some(cmd) = cmds.recv().await {
-            match cmd {
-                Cmd::Calibration(_) => todo!(),
-                _ => {
-                    events
-                        .send(Event::Error(anyhow!(
-                            "invalid command {:?} during calibration",
-                            cmd
-                        )))
-                        .unwrap();
-                }
+            msg_buf.clear();
+            // Serialization of our own data format into a vec should be infallible.
+            msg_buf = postcard::to_extend(&cmd, msg_buf).unwrap();
+
+            if let Err(e) = peripheral
+                .write(
+                    &control,
+                    &msg_buf,
+                    btleplug::api::WriteType::WithoutResponse,
+                )
+                .await
+            {
+                events
+                    .send(Event::Error(anyhow!("connection error: {e}")))
+                    .unwrap();
+                continue 'reconnect;
             }
         }
     }
