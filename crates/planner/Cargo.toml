@@ -11,7 +11,7 @@ std = ["bradipous-curves/std"]
 heapless = { version = "0.8.0", features = ["serde"] }
 kurbo = { workspace = true, default-features = false, features = ["serde", "libm"] }
 serde = { version = "1.0.190", default-features = false, features = ["derive"] }
-bradipous-curves = { path = "../bradipous-curves", default-features = false }
+bradipous-curves = { path = "../curves", default-features = false }
 libm = "0.2.8"
 
 [dev-dependencies]

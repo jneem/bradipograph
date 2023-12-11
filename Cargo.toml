@@ -2,10 +2,12 @@
 
 resolver = "2"
 members = [ 
-  "crates/bradipous-curves",
-  "crates/bradipous-feeder",
-  "crates/bradipous-geom",
-  "crates/bradipous-planner", "crates/feeder", "crates/protocol",
+  "crates/curves",
+  "crates/feeder",
+  "crates/feeder",
+  "crates/geom",
+  "crates/planner",
+  "crates/protocol",
 ]
 
 exclude = [ "embedded/bradipograph" ]

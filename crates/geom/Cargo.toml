@@ -8,7 +8,7 @@ std = ["bradipous-planner/std"]
 default = ["std"]
 
 [dependencies]
-bradipous-planner = { version = "0.1.0", path = "../bradipous-planner", default-features = false }
+bradipous-planner = { version = "0.1.0", path = "../planner", default-features = false }
 kurbo = { workspace = true, default-features = false, features = ["libm"] }
 libm = "0.2.8"
 

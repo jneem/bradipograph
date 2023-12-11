@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
-bradipous-curves = { version = "0.1.0", path = "../bradipous-curves" }
-bradipous-geom = { version = "0.1.0", path = "../bradipous-geom" }
-bradipous-planner = { version = "0.1.0", path = "../bradipous-planner" }
+bradipous-curves = { version = "0.1.0", path = "../curves" }
+bradipous-geom = { version = "0.1.0", path = "../geom" }
+bradipous-planner = { version = "0.1.0", path = "../planner" }
 bradipous-protocol = { version = "0.1.0", path = "../protocol" }
 btleplug = "0.11.3"
 clap = { version = "4.4.11", features = ["derive"] }
