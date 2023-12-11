@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use bradipous_protocol::{CalibrationStatus, Cmd};
 use btleplug::{
-    api::{Central, Characteristic, Peripheral as _},
+    api::{Central, Characteristic, Peripheral as _, WriteType},
     platform::{Adapter, Peripheral},
 };
 
@@ -45,11 +45,15 @@ impl Bradipograph {
     pub async fn send_cmd(&self, cmd: Cmd) -> anyhow::Result<()> {
         let buf = postcard::to_allocvec(&cmd)?;
         self.peripheral
-            .write(
-                &self.control,
-                &buf,
-                btleplug::api::WriteType::WithoutResponse,
-            )
+            .write(&self.control, &buf, WriteType::WithoutResponse)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn send_cmd_and_wait(&self, cmd: Cmd) -> anyhow::Result<()> {
+        let buf = postcard::to_allocvec(&cmd)?;
+        self.peripheral
+            .write(&self.control, &buf, WriteType::WithResponse)
             .await?;
         Ok(())
     }

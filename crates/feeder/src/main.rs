@@ -109,7 +109,7 @@ async fn handle_calibration(brad: &Bradipograph) -> Result<()> {
 
         eprintln!("Move to the right claw (20cm below, 10cm to the side)");
         manual_move(&mut events, brad).await?;
-        brad.send_cmd(Cmd::Calibrate(Calibrate::Finish {
+        brad.send_cmd_and_wait(Cmd::Calibrate(Calibrate::Finish {
             y_offset: 20.0,
             x_offset: 10.0,
         }))
