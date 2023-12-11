@@ -53,7 +53,7 @@ fn soon() -> u64 {
 }
 
 async fn calibrated_control(
-    cmds: Receiver<Cmd, 16>,
+    cmds: Receiver<Cmd, 64>,
     left: &mut Stepper,
     right: &mut Stepper,
     config: bradipous_geom::Config,
@@ -119,7 +119,7 @@ async fn calibrated_control(
 }
 
 async fn manual_control(
-    cmds: Receiver<Cmd, 16>,
+    cmds: Receiver<Cmd, 64>,
     left: &mut Stepper,
     right: &mut Stepper,
 ) -> (bradipous_geom::Config, kurbo::Point) {

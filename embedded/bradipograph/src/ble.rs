@@ -67,7 +67,7 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
                 Err(e) => println!("error: failed to deserialize command {data:?}: {e}"),
             };
 
-        let mut calibration_status = |_offset: usize, data: &mut [u8]| {
+        let mut calibration_status = |offset: usize, data: &mut [u8]| {
             let msg = STATUS.lock(|status| {
                 match (&status.borrow().calibration, &status.borrow().position) {
                     (Some(calib), Some(pos)) => {
@@ -80,8 +80,9 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
 
             let buf = heapless::Vec::<u8, 64>::new();
             let buf = postcard::to_extend(&msg, buf).unwrap();
-            data.copy_from_slice(&buf);
-            buf.len()
+            let len = buf.len().saturating_sub(offset).min(data.len());
+            data[..len].copy_from_slice(&buf[offset..(offset + len)]);
+            len
         };
 
         // TODO: make a builder pattern that allows us to make these without requiring literal uuids
