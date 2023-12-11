@@ -238,7 +238,7 @@ async fn manual_control(
 
     let config = bradipous_geom::ConfigBuilder::default()
         .with_spool_radius(radius)
-        .with_max_hang(50.0)
+        .with_max_hang(30.0)
         .with_hanging_calibration(y_offset as f64, x_offset as f64, distance_cm)
         .build();
 
