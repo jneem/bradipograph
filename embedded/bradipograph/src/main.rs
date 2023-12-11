@@ -266,6 +266,7 @@ async fn manual_control(
             right: steps.right,
         });
     });
+    println!("finished setting status");
 
     (config, pos)
 }

@@ -8,7 +8,7 @@ use btleplug::{
 use uuid::{uuid, Uuid};
 
 pub const CONTROL_UUID: Uuid = uuid!("68a79628-2609-4569-8d7d-3b29fde28877");
-pub const CALIBRATION_UUID: Uuid = uuid!("68a79628-2609-4569-8d7d-3b29fde28877");
+pub const CALIBRATION_UUID: Uuid = uuid!("68a79629-2609-4569-8d7d-3b29fde28877");
 
 pub struct Bradipograph {
     pub peripheral: Peripheral,

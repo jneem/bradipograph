@@ -143,7 +143,7 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let calib = match &calibration {
         CalibrationStatus::Uncalibrated => unreachable!(),
         CalibrationStatus::Calibrated(c) => c,
-        CalibrationStatus::CalibratedAndPositioned(c, _) => c,
+        //CalibrationStatus::CalibratedAndPositioned(c, _) => c,
     };
     let config = ConfigBuilder::default()
         .with_max_hang(calib.max_hang as f64)

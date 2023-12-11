@@ -68,14 +68,9 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
             };
 
         let mut calibration_status = |offset: usize, data: &mut [u8]| {
-            let msg = STATUS.lock(|status| {
-                match (&status.borrow().calibration, &status.borrow().position) {
-                    (Some(calib), Some(pos)) => {
-                        CalibrationStatus::CalibratedAndPositioned(calib.clone(), pos.clone())
-                    }
-                    (Some(calib), None) => CalibrationStatus::Calibrated(calib.clone()),
-                    (None, _) => CalibrationStatus::Uncalibrated,
-                }
+            let msg = STATUS.lock(|status| match &status.borrow().calibration {
+                Some(calib) => CalibrationStatus::Calibrated(calib.clone()),
+                None => CalibrationStatus::Uncalibrated,
             });
 
             let buf = heapless::Vec::<u8, 64>::new();
