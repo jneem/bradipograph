@@ -1,0 +1,24 @@
+[package]
+name = "bradipous-feeder2"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { version = "1.0.75", features = ["backtrace"] }
+bradipous-curves = { version = "0.1.0", path = "../bradipous-curves" }
+bradipous-geom = { version = "0.1.0", path = "../bradipous-geom" }
+bradipous-planner = { version = "0.1.0", path = "../bradipous-planner" }
+bradipous-protocol = { version = "0.1.0", path = "../protocol" }
+btleplug = "0.11.3"
+clap = { version = "4.4.11", features = ["derive"] }
+crossterm = { version = "0.27.0", features = ["event-stream"] }
+futures = "0.3.29"
+indicatif = "0.17.7"
+kurbo = { workspace = true, features = ["std"] }
+postcard = { version = "1.0.8", features = ["alloc"] }
+reedline = "0.26.0"
+tokio = { version = "1.35.0", features = ["macros", "rt-multi-thread", "sync"] }
+usvg = "0.36.0"
+uuid = "1.6.1"

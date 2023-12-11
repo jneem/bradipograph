@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use btleplug::{
     api::{Central, Manager as _, Peripheral as _, ScanFilter},
-    platform::{Manager, Peripheral},
+    platform::{Adapter, Manager, Peripheral},
 };
 use crossterm::event::{self, EventStream, KeyCode};
 use futures::Stream;
@@ -39,12 +39,63 @@ pub fn init(cmds: mpsc::Receiver<Cmd>) -> impl Stream<Item = Event> + Unpin {
     UnboundedReceiverStream::new(event_rx).merge(event_stream)
 }
 
+async fn find_bradipograph(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
+    loop {
+        let peripherals = adapter.peripherals().await?;
+        for p in peripherals {
+            if let Some(props) = p.properties().await? {
+                if props.local_name.as_deref() == Some("Bradipograph") {
+                    return Ok(p);
+                }
+            }
+        }
+    }
+}
+
+async fn handle_connection(
+    adapter: &mut Adapter,
+    cmds: &mut mpsc::Receiver<Cmd>,
+    events: &mut mpsc::UnboundedSender<Event>,
+) -> anyhow::Result<()> {
+    let peripheral = find_bradipograph(adapter).await?;
+    events.send(Event::Found).unwrap();
+
+    peripheral.connect().await?;
+
+    peripheral.discover_services().await?;
+    events.send(Event::Connected(peripheral.clone())).unwrap();
+
+    let control_uuid = Uuid::parse_str(CONTROL_UUID).unwrap();
+    let control = peripheral
+        .characteristics()
+        .into_iter()
+        .find(|ch| ch.uuid == control_uuid)
+        .ok_or_else(|| anyhow!("Bradipous was missing the characteristic {control_uuid}"))?;
+
+    let mut msg_buf = Vec::new();
+    while let Some(cmd) = cmds.recv().await {
+        msg_buf.clear();
+        // Serialization of our own data format into a vec should be infallible.
+        msg_buf = postcard::to_extend(&cmd, msg_buf).unwrap();
+
+        peripheral
+            .write(
+                &control,
+                &msg_buf,
+                btleplug::api::WriteType::WithoutResponse,
+            )
+            .await?
+    }
+
+    Ok(())
+}
+
 pub async fn ble_connection(
     mut cmds: mpsc::Receiver<Cmd>,
-    events: mpsc::UnboundedSender<Event>,
+    mut events: mpsc::UnboundedSender<Event>,
 ) -> anyhow::Result<()> {
     let manager = Manager::new().await?;
-    let adapter = manager
+    let mut adapter = manager
         .adapters()
         .await?
         .into_iter()
@@ -52,77 +103,13 @@ pub async fn ble_connection(
         .ok_or(anyhow!("no bluetooth adapter"))?;
     adapter.start_scan(ScanFilter::default()).await?;
 
-    'reconnect: loop {
+    loop {
         // TODO: instead of continue 'reconnect all the time, factor out a function that returns and error
         // when the connection is broken
         events.send(Event::Disconnected).unwrap();
 
-        let peripheral;
-        'search: loop {
-            let peripherals = adapter.peripherals().await?;
-            for p in peripherals {
-                match p.properties().await {
-                    Ok(Some(props)) => {
-                        if props.local_name.as_deref() == Some("Bradipograph") {
-                            peripheral = p;
-                            break 'search;
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(e) => events.send(Event::Error(e.into())).unwrap(),
-                }
-            }
-        }
-        events.send(Event::Found).unwrap();
-
-        if let Err(e) = peripheral.connect().await {
-            events.send(Event::Error(e.into())).unwrap();
-            continue 'reconnect;
-        };
-
-        if let Err(e) = peripheral.discover_services().await {
-            events.send(Event::Error(e.into())).unwrap();
-            continue 'reconnect;
-        };
-        events.send(Event::Connected(peripheral.clone())).unwrap();
-
-        let control_uuid = Uuid::parse_str(CONTROL_UUID).unwrap();
-        let control = match peripheral
-            .characteristics()
-            .into_iter()
-            .find(|ch| ch.uuid == control_uuid)
-        {
-            Some(c) => c,
-            None => {
-                events
-                    .send(Event::Error(anyhow!(
-                        "Bradipous was missing the characteristic {}",
-                        control_uuid
-                    )))
-                    .unwrap();
-                continue 'reconnect;
-            }
-        };
-
-        let mut msg_buf = Vec::new();
-        while let Some(cmd) = cmds.recv().await {
-            msg_buf.clear();
-            // Serialization of our own data format into a vec should be infallible.
-            msg_buf = postcard::to_extend(&cmd, msg_buf).unwrap();
-
-            if let Err(e) = peripheral
-                .write(
-                    &control,
-                    &msg_buf,
-                    btleplug::api::WriteType::WithoutResponse,
-                )
-                .await
-            {
-                events
-                    .send(Event::Error(anyhow!("connection error: {e}")))
-                    .unwrap();
-                continue 'reconnect;
-            }
+        if let Err(e) = handle_connection(&mut adapter, &mut cmds, &mut events).await {
+            events.send(Event::Error(e)).unwrap();
         }
     }
 }

@@ -5,7 +5,7 @@ members = [
   "crates/bradipous-curves",
   "crates/bradipous-feeder",
   "crates/bradipous-geom",
-  "crates/bradipous-planner", "crates/protocol",
+  "crates/bradipous-planner", "crates/feeder", "crates/protocol",
 ]
 
 exclude = [ "embedded/bradipograph" ]

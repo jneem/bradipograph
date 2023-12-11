@@ -1,6 +1,6 @@
 use std::io::{self, stdout};
 
-use bradipous_protocol::{Calibration, Cmd, ManualControl};
+use bradipous_protocol::{Calibrate, Cmd, ManualControl};
 use btleplug::{api::Peripheral as _, platform::Peripheral};
 use crossterm::{
     event::KeyCode,
@@ -234,13 +234,13 @@ async fn calibrating_events(
             Event::Key(KeyCode::Enter) => {
                 if state.left_finished {
                     done_calibrating = true;
-                    Some(Cmd::Calibrate(Calibration::Finish {
+                    Some(Cmd::Calibrate(Calibrate::Finish {
                         y_offset: 20.0,
                         x_offset: 10.0,
                     }))
                 } else {
                     state.left_finished = true;
-                    Some(Cmd::Calibrate(Calibration::MarkLeft))
+                    Some(Cmd::Calibrate(Calibrate::MarkLeft))
                 }
             }
             Event::Disconnected => return Ok(AppState::Loading(LoadingState::default())),

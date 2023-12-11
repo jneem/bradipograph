@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use bradipous_protocol::{Calibration, Cmd, ManualControl};
+use bradipous_protocol::{Calibrate, Cmd, ManualControl};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Duration, Timer};
@@ -27,7 +27,7 @@ use stepper::{Direction, Stepper};
 mod ble;
 mod stepper;
 
-use ble::{ble_task, CmdChannel};
+use ble::{ble_task, CmdChannel, STATUS};
 
 pub type Channel<T, const N: usize> = embassy_sync::channel::Channel<CriticalSectionRawMutex, T, N>;
 pub type Sender<T, const N: usize> =
@@ -59,11 +59,16 @@ async fn calibrated_control(
     config: bradipous_geom::Config,
     init_pos: Point,
 ) {
-    let mut steps = config.point_to_steps(&init_pos);
+    let mut point = init_pos;
+    let mut steps = config.point_to_steps(&point);
+    println!("init_pos {init_pos:?}, init_steps {steps:?}");
     loop {
         match cmds.receive().await {
             Cmd::MoveTo(x, y) => {
-                let target_steps = config.point_to_steps(&Point::new(x as f64, y as f64));
+                // TODO: validate that the point is within range
+                let p = Point::new(x as f64, y as f64);
+                let target_steps = config.point_to_steps(&p);
+                println!("move to (x, y), steps {target_steps:?}");
                 let mut right_count = target_steps.right.abs_diff(steps.right);
                 let mut left_count = target_steps.left.abs_diff(steps.left);
                 let right_dir = if target_steps.right > steps.right {
@@ -77,7 +82,7 @@ async fn calibrated_control(
                     Direction::Clockwise
                 };
 
-                while right_count != 0 && left_count != 0 {
+                while right_count != 0 || left_count != 0 {
                     if left_count > 0 {
                         left.step(left_dir);
                         left_count -= 1;
@@ -90,12 +95,26 @@ async fn calibrated_control(
                 }
 
                 steps = target_steps;
+                point = p;
+            }
+            Cmd::SetPos(x, y) => {
+                point = Point::new(x as f64, y as f64);
+                steps = config.point_to_steps(&point);
             }
             _ => {
                 println!("unexpected cmd in calibrated mode");
                 continue;
             }
         }
+
+        STATUS.lock(|status| {
+            status.borrow_mut().position = Some(bradipous_protocol::Position {
+                x: point.x as f32,
+                y: point.y as f32,
+                left: steps.left,
+                right: steps.right,
+            })
+        })
     }
 }
 
@@ -166,11 +185,11 @@ async fn manual_control(
                 Cmd::Manual(cmd) => {
                     state.apply(cmd);
                 }
-                Cmd::Calibrate(Calibration::MarkLeft) => {
+                Cmd::Calibrate(Calibrate::MarkLeft) => {
                     position.left = 0;
                     position.right = 0;
                 }
-                Cmd::Calibrate(Calibration::Finish { y_offset, x_offset }) => {
+                Cmd::Calibrate(Calibrate::Finish { y_offset, x_offset }) => {
                     break 'calibrate (y_offset, x_offset);
                 }
                 _ => println!("unexpected command in manual mode"),
@@ -210,20 +229,43 @@ async fn manual_control(
         }
     };
 
+    let radius = 1.3;
+    let circumference = radius * 2.0 * core::f64::consts::PI;
+    let steps_per_rev = 2036.0;
+
+    let distance_steps = ((position.left.abs() + position.right.abs()) / 2) as f64;
+    let distance_cm = distance_steps / steps_per_rev * circumference;
+
     let config = bradipous_geom::ConfigBuilder::default()
-        .with_hanging_calibration(
-            y_offset as f64,
-            x_offset as f64,
-            ((position.left.abs() + position.right.abs()) / 2) as f64,
-        )
+        .with_spool_radius(radius)
+        .with_max_hang(50.0)
+        .with_hanging_calibration(y_offset as f64, x_offset as f64, distance_cm)
         .build();
+
+    println!(
+        "calibrated {distance_steps} steps, {distance_cm} cm, claw distance {}",
+        config.claw_distance
+    );
 
     // The current position should be y_offset cm below the right claw and x_offset cm
     // to its left.
     let pos = kurbo::Point::new(
         config.claw_distance / 2.0 - x_offset as f64,
-        y_offset as f64 - config.max_hang,
+        y_offset as f64 - config.hang_offset,
     );
+    println!("current position {pos:?}");
+    let steps = config.point_to_steps(&pos);
+
+    STATUS.lock(|status| {
+        let mut status = status.borrow_mut();
+        status.calibration = Some(config.clone().into());
+        status.position = Some(bradipous_protocol::Position {
+            x: pos.x as f32,
+            y: pos.y as f32,
+            left: steps.left,
+            right: steps.right,
+        });
+    });
 
     (config, pos)
 }

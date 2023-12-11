@@ -29,6 +29,10 @@ impl Angle {
     pub fn radians(&self) -> f64 {
         self.radians
     }
+
+    pub fn degrees(&self) -> f64 {
+        self.radians * 180.0 / core::f64::consts::PI
+    }
 }
 
 pub struct ArmLengths {
@@ -41,6 +45,7 @@ pub struct RotorAngles {
     pub right: Angle,
 }
 
+#[derive(Debug)]
 pub struct StepperPositions {
     pub left: u32,
     pub right: u32,
@@ -121,6 +126,11 @@ impl ConfigBuilder {
         self.spool_radius = spool_radius;
         self
     }
+
+    pub fn with_claw_distance(&mut self, claw_distance: f64) -> &mut Self {
+        self.claw_distance = claw_distance;
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -135,7 +145,7 @@ pub struct Config {
     // offset our publicly-visible coordinates by this amount, so that
     // our (0, 0) coordinate is in the middle of the two claws, hanging
     // below them by `hang_offset`.
-    hang_offset: f64,
+    pub hang_offset: f64,
 }
 
 impl Config {
