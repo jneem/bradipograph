@@ -387,8 +387,8 @@ async fn main(spawner: Spawner) {
     let mut flash = FlashStorage::new();
     flash.read(FLASH_ADDR, &mut buf).unwrap();
 
-    let (config, pos) = if let Ok(d) = postcard::from_bytes::<FlashData>(&buf) {
-        (d.config, d.position)
+    let (config, pos) = if let Some((c, p)) = read_config() {
+        (c, p)
     } else {
         let (config, position) =
             manual_control(CMD_CHANNEL.receiver(), &mut left, &mut right).await;
@@ -405,13 +405,27 @@ struct FlashData {
     position: Point,
 }
 
+fn read_config() -> Option<(bradipous_geom::Config, Point)> {
+    let mut buf = [0u8; 256];
+    let mut flash = FlashStorage::new();
+    flash.read(FLASH_ADDR, &mut buf).unwrap();
+
+    if &buf[0..4] == b"brad" {
+        let data = postcard::from_bytes::<FlashData>(&buf[4..]).ok()?;
+        Some((data.config, data.position))
+    } else {
+        None
+    }
+}
+
 fn store_config(config: &bradipous_geom::Config, pos: &Point) {
     let mut buf = [0u8; 256];
+    buf[0..4].copy_from_slice(b"brad");
     let mut flash = FlashStorage::new();
     let data = FlashData {
         config: config.clone(),
         position: *pos,
     };
-    let buf = postcard::to_slice(&data, &mut buf).unwrap();
-    flash.write(FLASH_ADDR, buf).unwrap();
+    let _ = postcard::to_slice(&data, &mut buf[4..]).unwrap();
+    flash.write(FLASH_ADDR, &buf).unwrap();
 }
