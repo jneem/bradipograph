@@ -10,6 +10,7 @@ use kurbo::{
 use libm::{fabs, sqrt};
 
 mod arclen;
+pub mod stepper;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct MotionCurve<const CAP: usize> {

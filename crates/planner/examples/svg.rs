@@ -58,7 +58,7 @@ pub fn main() -> anyhow::Result<()> {
 
     let mut curve = Curve::<1024>::default();
     for p in paths.iter() {
-        curve.extend(p).unwrap();
+        curve.extend(p.elements()).unwrap();
     }
     let m = MotionCurve::<1024>::plan(&curve, &config, &BrachioTransform);
     let out = File::create(&args.output)?;

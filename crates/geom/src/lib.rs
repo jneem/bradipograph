@@ -10,7 +10,7 @@ fn square(x: f64) -> f64 {
     x * x
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct Angle {
     radians: f64,
 }
@@ -133,7 +133,7 @@ impl ConfigBuilder {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub claw_distance: f64,
     pub spool_radius: f64,

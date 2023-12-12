@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["std"]
-std = ["bradipous-curves/std"]
+std = ["bradipous-curves/std", "kurbo/std"]
 
 [dependencies]
 heapless = { version = "0.8.0", features = ["serde"] }
@@ -13,6 +13,7 @@ kurbo = { workspace = true, default-features = false, features = ["serde", "libm
 serde = { version = "1.0.190", default-features = false, features = ["derive"] }
 bradipous-curves = { path = "../curves", default-features = false }
 libm = "0.2.8"
+fixed = "1.24.0"
 
 [dev-dependencies]
 anyhow = "1.0.75"

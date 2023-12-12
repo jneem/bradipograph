@@ -2,10 +2,13 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+use bradipous_geom::Config;
+use bradipous_planner::stepper::{Accel, Velocity};
 use bradipous_protocol::{Calibrate, Cmd, ManualControl};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Duration, Timer};
+use embedded_storage::{ReadStorage, Storage};
 use esp32c3_hal::{
     clock::ClockControl,
     embassy,
@@ -18,6 +21,7 @@ use esp32c3_hal::{
 };
 use esp_backtrace as _;
 use esp_println::println;
+use esp_storage::FlashStorage;
 use esp_wifi::EspWifiInitFor;
 use espilepsy::Color;
 use futures::future::Either;
@@ -38,6 +42,8 @@ pub type Receiver<T, const N: usize> =
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::new();
 
+const FLASH_ADDR: u32 = 0x110000;
+
 #[derive(Default)]
 struct StepperPosition {
     left: i32,
@@ -51,6 +57,11 @@ fn now() -> u64 {
 fn soon() -> u64 {
     SystemTimer::now() + SystemTimer::TICKS_PER_SECOND
 }
+
+const MAX_STEPS_PER_SEC: u32 = 500;
+// what fraction of a second does it take to reach max velocity
+const MAX_VELOCITY_PER_SEC: u32 = 8;
+const MAX_ACCEL: u32 = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
 
 async fn calibrated_control(
     cmds: Receiver<Cmd, 64>,
@@ -69,8 +80,47 @@ async fn calibrated_control(
                 let p = Point::new(x as f64, y as f64);
                 let target_steps = config.point_to_steps(&p);
                 println!("move to (x, y), steps {target_steps:?}");
-                let mut right_count = target_steps.right.abs_diff(steps.right);
-                let mut left_count = target_steps.left.abs_diff(steps.left);
+                let right_count = target_steps.right.abs_diff(steps.right);
+                let left_count = target_steps.left.abs_diff(steps.left);
+
+                let max_count = right_count.max(left_count);
+                let steps_to_full_v = MAX_STEPS_PER_SEC / MAX_VELOCITY_PER_SEC;
+
+                let decel_steps = steps_to_full_v.min(max_count / 2);
+                let decel = bradipous_planner::stepper::Position {
+                    left: (left_count * decel_steps / max_count) as u16,
+                    right: (right_count * decel_steps / max_count) as u16,
+                };
+                let accel = bradipous_planner::stepper::Position {
+                    left: left_count as u16 - decel.left,
+                    right: right_count as u16 - decel.right,
+                };
+
+                let max_velocity = libm::sqrtf((decel_steps * MAX_ACCEL) as f32) as u32;
+                let max_velocity = Velocity {
+                    steps_per_s: max_velocity.min(MAX_STEPS_PER_SEC) as u16,
+                };
+                let min_velocity = Velocity {
+                    steps_per_s: libm::sqrtf(MAX_ACCEL as f32 / 2.0) as u16,
+                };
+
+                let accel_seg = bradipous_planner::stepper::Segment {
+                    steps: accel,
+                    start_velocity: min_velocity,
+                    end_velocity: max_velocity,
+                    accel: Accel {
+                        steps_per_s_per_s: MAX_ACCEL,
+                    },
+                };
+                let decel_seg = bradipous_planner::stepper::Segment {
+                    steps: decel,
+                    start_velocity: max_velocity,
+                    end_velocity: min_velocity,
+                    accel: Accel {
+                        steps_per_s_per_s: MAX_ACCEL,
+                    },
+                };
+
                 let right_dir = if target_steps.right > steps.right {
                     Direction::Clockwise
                 } else {
@@ -82,24 +132,24 @@ async fn calibrated_control(
                     Direction::Clockwise
                 };
 
-                while right_count != 0 || left_count != 0 {
-                    if left_count > 0 {
+                for tick in accel_seg.iter_steps().chain(decel_seg.iter_steps()) {
+                    if tick.left {
                         left.step(left_dir);
-                        left_count -= 1;
                     }
-                    if right_count > 0 {
+                    if tick.right {
                         right.step(right_dir);
-                        right_count -= 1;
                     }
-                    Timer::after_millis(2).await;
+                    Timer::after_micros(tick.delay_us.into()).await;
                 }
 
                 steps = target_steps;
                 point = p;
+                store_config(&config, &point);
             }
             Cmd::SetPos(x, y) => {
                 point = Point::new(x as f64, y as f64);
                 steps = config.point_to_steps(&point);
+                store_config(&config, &point);
             }
             _ => {
                 println!("unexpected cmd in calibrated mode");
@@ -333,6 +383,35 @@ async fn main(spawner: Spawner) {
         io.pins.gpio10.into_push_pull_output(),
     );
 
-    let (config, pos) = manual_control(CMD_CHANNEL.receiver(), &mut left, &mut right).await;
+    let mut buf = [0u8; 256];
+    let mut flash = FlashStorage::new();
+    flash.read(FLASH_ADDR, &mut buf).unwrap();
+
+    let (config, pos) = if let Ok(d) = postcard::from_bytes::<FlashData>(&buf) {
+        (d.config, d.position)
+    } else {
+        let (config, position) =
+            manual_control(CMD_CHANNEL.receiver(), &mut left, &mut right).await;
+        store_config(&config, &position);
+        (config, position)
+    };
+
     calibrated_control(CMD_CHANNEL.receiver(), &mut left, &mut right, config, pos).await;
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct FlashData {
+    config: Config,
+    position: Point,
+}
+
+fn store_config(config: &bradipous_geom::Config, pos: &Point) {
+    let mut buf = [0u8; 256];
+    let mut flash = FlashStorage::new();
+    let data = FlashData {
+        config: config.clone(),
+        position: *pos,
+    };
+    let buf = postcard::to_slice(&data, &mut buf).unwrap();
+    flash.write(FLASH_ADDR, buf).unwrap();
 }
