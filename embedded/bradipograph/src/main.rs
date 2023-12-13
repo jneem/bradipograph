@@ -112,6 +112,10 @@ async fn calibrated_control(
                         steps_per_s_per_s: MAX_ACCEL,
                     },
                 };
+                println!("accel segment {:?}", accel_seg.iter_steps());
+                for tick in accel_seg.iter_steps().take(10) {
+                    println!("tick: {tick:?}");
+                }
                 let decel_seg = bradipous_planner::stepper::Segment {
                     steps: decel,
                     start_velocity: max_velocity,
@@ -412,6 +416,17 @@ fn read_config() -> Option<(bradipous_geom::Config, Point)> {
 
     if &buf[0..4] == b"brad" {
         let data = postcard::from_bytes::<FlashData>(&buf[4..]).ok()?;
+        let steps = data.config.point_to_steps(&data.position);
+        STATUS.lock(|status| {
+            let mut status = status.borrow_mut();
+            status.calibration = Some(data.config.clone().into());
+            status.position = Some(bradipous_protocol::Position {
+                x: data.position.x as f32,
+                y: data.position.y as f32,
+                left: steps.left,
+                right: steps.right,
+            });
+        });
         Some((data.config, data.position))
     } else {
         None

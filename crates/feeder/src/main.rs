@@ -133,6 +133,7 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
 
     let mut calibration = brad.read_calibration().await?;
     bar.finish_with_message("received!");
+    dbg!(&calibration);
 
     while matches!(calibration, CalibrationStatus::Uncalibrated) {
         eprintln!("Uncalibrated, entering calibration mode");
@@ -174,11 +175,14 @@ async fn send_file(
     svg::transform(&mut paths, config);
     let mut points = Vec::new();
     for p in &paths {
+        let mut my_points = Vec::new();
         p.flatten(0.5, |el| match el {
-            kurbo::PathEl::MoveTo(pt) => points.push(pt),
-            kurbo::PathEl::LineTo(pt) => points.push(pt),
+            kurbo::PathEl::MoveTo(pt) => my_points.push(pt),
+            kurbo::PathEl::LineTo(pt) => my_points.push(pt),
+            kurbo::PathEl::ClosePath => my_points.push(my_points[0]),
             _ => unreachable!(),
         });
+        points.extend_from_slice(&my_points);
     }
 
     if points.len() > 64 {

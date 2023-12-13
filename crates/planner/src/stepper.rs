@@ -1,8 +1,3 @@
-use fixed::{
-    traits::ToFixed as _,
-    types::{U16F16, U32F32},
-};
-
 #[derive(Clone, Copy, Debug)]
 pub struct Position {
     pub left: u16,
@@ -36,40 +31,50 @@ pub struct Tick {
     pub delay_us: u32,
 }
 
+const MAX_PARAM: u32 = 1 << 24;
+
 impl Segment {
     pub fn iter_steps(&self) -> StepIter {
         // If either left or right doesn't move, the reciprocal is 1/0. But we can safely
         // replace it by 1, because in this case it will only ever get multiplied by zero.
-        let recip_left_steps = U32F32::from_num(self.steps.left)
-            .checked_recip()
-            .unwrap_or(1u8.into());
-        let recip_right_steps = U32F32::from_num(self.steps.right)
-            .checked_recip()
-            .unwrap_or(1u8.into());
+        let recip_left_steps = MAX_PARAM.checked_div(self.steps.left as u32).unwrap_or(1);
+        let recip_right_steps = MAX_PARAM.checked_div(self.steps.right as u32).unwrap_or(1);
 
-        let steps_per_param = U16F16::from_num(self.steps.left.max(self.steps.right));
-        let param_per_steps = U16F16::from_num(steps_per_param.recip());
-        let s_per_t = U16F16::from_num(U32F32::from(1_000_000u32) / U32F32::from(1024u32 * 1024));
+        // There should be a minimum number of steps. If we say 16, it means that this can
+        // be at most 2^19.
+        let param_per_steps = MAX_PARAM / (self.steps.left.max(self.steps.right) as u32);
+        // TODO: convert from seconds to mebi-microseconds
+        //let s_per_t = U32F32::from(1_000_000u32) / U32F32::from(1024u32 * 1024);
 
-        // TODO: re-evaluate the minimum velocity
-        let start_param_per_t =
-            U16F16::from(self.start_velocity.steps_per_s.max(2)) * s_per_t * param_per_steps;
-        let end_param_per_t =
-            U16F16::from(self.end_velocity.steps_per_s.max(2)) * s_per_t * param_per_steps;
-        let param_per_t_per_t = U32F32::from(self.accel.steps_per_s_per_s)
-            * U32F32::from(param_per_steps * s_per_t * s_per_t);
+        // We impose a minimum velocity so that we don't wait forever until the first step.
+        // A sensible value would be sqrt(accel / 2), since that's the velocity after a
+        // single step. We mostly rely on the caller to set the minimum velocity, though.
+        //
+        // The effect of the saturating_mul here is that the velocity will get truncated
+        // if (1) it's fast and (2) there are very few steps. This truncation is probably
+        // fine, because it will be over soon anyway.
+        let start_param_per_t = (self.start_velocity.steps_per_s as u32)
+            .max(16)
+            .saturating_mul(param_per_steps);
+
+        let end_param_per_t = (self.end_velocity.steps_per_s as u32)
+            .max(16)
+            .saturating_mul(param_per_steps);
+
+        let param_per_t_per_t = self.accel.steps_per_s_per_s.saturating_mul(param_per_steps);
 
         StepIter {
             pos: Position { left: 0, right: 0 },
-            max_pos: self.steps.clone(),
-            param: 0i8.to_fixed(),
+            max_pos: self.steps,
+            param: 0,
             recip_left_steps,
             recip_right_steps,
-            t_per_param: start_param_per_t.recip(),
-            t_per_param_min: start_param_per_t.max(end_param_per_t).recip(),
-            t_per_param_max: start_param_per_t.min(end_param_per_t).recip(),
-            param_per_t_per_t: U16F16::from_num(param_per_t_per_t),
-            speeding_up: end_param_per_t < start_param_per_t,
+            param_per_t: start_param_per_t,
+            param_per_t_min: start_param_per_t.min(end_param_per_t),
+            param_per_t_max: start_param_per_t.max(end_param_per_t),
+            param_per_t_per_t,
+            debounce: recip_right_steps.min(recip_left_steps) / 8,
+            speeding_up: end_param_per_t > start_param_per_t,
         }
     }
 }
@@ -84,21 +89,25 @@ pub struct StepIter {
     pos: Position,
 
     // Current parametrization, as a fraction of the distance from
-    // the start position to the end position.
-    param: U16F16,
+    // the start position to the end position. This maxes out at 2^24.
+    param: u32,
 
-    // Current reciprocal speed
-    t_per_param: U16F16,
+    // Current speed, in param per unit time. This goes up to 2^32 - 1, meaning
+    // that the fastest we can get through the whole parameter space is about 1/256
+    // of a second.
+    param_per_t: u32,
 
-    // TODO: this is the reciprocal of an integer, and we're losing precision by not having more fractional bits.
-    // It would probably be ok to have this as a U1F31, and then multiply it by an integer to get a U16F16 or so...
-    // but `fixed` doesn't make it so convenient to mix precisions like this.
-    recip_left_steps: U32F32,
-    recip_right_steps: U32F32,
+    // Measured in the same units as `param`, if two steps happen closer than this
+    // we make them happen at the same time.
+    debounce: u32,
 
-    t_per_param_min: U16F16,
-    t_per_param_max: U16F16,
-    param_per_t_per_t: U16F16,
+    // These are relative to MAX_PARAM, in that (modulo rounding errors) recip_left_steps * left_steps = MAX_PARAM.
+    recip_left_steps: u32,
+    recip_right_steps: u32,
+
+    param_per_t_min: u32,
+    param_per_t_max: u32,
+    param_per_t_per_t: u32,
 
     speeding_up: bool,
 }
@@ -107,38 +116,47 @@ impl Iterator for StepIter {
     type Item = Tick;
 
     fn next(&mut self) -> Option<Tick> {
-        if self.param == 1 {
+        if self.param == MAX_PARAM {
             return None;
         }
 
-        // FIXME: this effectively restricts us to 2^16 steps
         let next_left = (self.pos.left + 1).min(self.max_pos.left);
-        let next_param_left = U16F16::from_num(U32F32::from(next_left) * self.recip_left_steps);
+        let next_param_left = next_left as u32 * self.recip_left_steps;
         let next_right = (self.pos.right + 1).min(self.max_pos.right);
-        let next_param_right = U16F16::from_num(U32F32::from(next_right) * self.recip_right_steps);
+        let next_param_right = next_right as u32 * self.recip_right_steps;
 
         let next_param = match (
-            next_right == self.max_pos.right,
-            next_left == self.max_pos.left,
+            next_right >= self.max_pos.right,
+            next_left >= self.max_pos.left,
         ) {
-            (true, true) => U16F16::from(1u8),
+            (true, true) => MAX_PARAM,
             (true, false) => next_param_left,
             (false, true) => next_param_right,
-            // TODO: should have some wiggle room if they're very close to each other.
             (false, false) => next_param_left.min(next_param_right),
         };
-
-        let dt = (next_param - self.param) * self.t_per_param;
-
-        if self.speeding_up {
-            self.t_per_param -= dt * self.param_per_t_per_t * self.t_per_param;
+        let max_next_param = next_param_left.max(next_param_right).max(next_param);
+        let next_param = if max_next_param <= next_param + self.debounce {
+            max_next_param
         } else {
-            self.t_per_param += dt * self.param_per_t_per_t * self.t_per_param;
-        }
-        self.t_per_param = self
-            .t_per_param
-            .clamp(self.t_per_param_min, self.t_per_param_max);
+            next_param
+        };
 
+        // dt is (next_param - self.param) / self.param_per_t, but this is often smaller
+        // than 1, so we expand the precision first.
+        let dt = (((next_param - self.param) as u64) << 32) / self.param_per_t as u64;
+        let dparam_per_t = ((self.param_per_t_per_t as u64 * dt) >> 32) as u32;
+
+        self.param_per_t = if self.speeding_up {
+            self.param_per_t
+                .saturating_add(dparam_per_t)
+                .min(self.param_per_t_max)
+        } else {
+            self.param_per_t
+                .saturating_sub(dparam_per_t)
+                .max(self.param_per_t_min)
+        };
+
+        // TODO: do we also need to check that self.pos.left < self.max_pos.left?
         if next_param_left <= next_param {
             self.pos.left += 1;
         }
@@ -150,7 +168,7 @@ impl Iterator for StepIter {
         Some(Tick {
             left: next_param_left <= next_param,
             right: next_param_right <= next_param,
-            delay_us: dt.to_bits() << 4,
+            delay_us: ((dt * 1_000_000) >> 32) as u32,
         })
     }
 }
@@ -159,21 +177,19 @@ impl Iterator for StepIter {
 mod tests {
     use super::*;
 
+    // TODO: add a property test checking that the number of steps is always correct.
     #[test]
     fn basic() {
         let seg = Segment {
             steps: Position {
-                left: 1024,
-                right: 512,
+                left: 20,
+                right: 19,
             },
-            start_velocity: Velocity { steps_per_s: 0 },
-            end_velocity: Velocity { steps_per_s: 100 },
+            start_velocity: Velocity { steps_per_s: 64 },
+            end_velocity: Velocity { steps_per_s: 500 },
             accel: Accel {
-                steps_per_s_per_s: 1000,
+                steps_per_s_per_s: 8 * 500,
             },
         };
-
-        let ticks: Vec<_> = seg.iter_steps().collect();
-        dbg!(ticks.len());
     }
 }
