@@ -45,7 +45,7 @@ pub struct RotorAngles {
     pub right: Angle,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct StepperPositions {
     pub left: u32,
     pub right: u32,
@@ -133,7 +133,7 @@ impl ConfigBuilder {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub claw_distance: f64,
     pub spool_radius: f64,
@@ -165,6 +165,12 @@ impl Config {
             left: sqrt(square(self.claw_distance / 2.0 + x) + square(y)),
             right: sqrt(square(self.claw_distance / 2.0 - x) + square(y)),
         }
+    }
+
+    pub fn arm_lengths_to_point(&self, lengths: &ArmLengths) -> Point {
+        let x = (square(lengths.left) - square(lengths.right)) / (2.0 * self.claw_distance);
+        let y = sqrt(square(lengths.left) - square(self.claw_distance / 2.0 + x));
+        Point::new(x, y)
     }
 
     pub fn rotor_angles(&self, lengths: &ArmLengths) -> RotorAngles {

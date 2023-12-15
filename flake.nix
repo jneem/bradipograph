@@ -22,6 +22,7 @@
           fx.latest.clippy
           fx.latest.rustfmt
           fx.latest.rust-src
+          fx.targets.riscv32imc-unknown-none-elf.latest.rust-std
         ];
         python-toolchain = pkgs.python3.withPackages (ps: [ps.bleak]);
       in

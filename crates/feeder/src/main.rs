@@ -7,15 +7,12 @@ use std::{
 
 use anyhow::anyhow;
 use bradipous_geom::ConfigBuilder;
-use bradipous_protocol::{Calibrate, CalibrationStatus, Cmd, ManualControl};
+use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
     api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
     platform::{Adapter, Manager, Peripheral},
 };
 use clap::Parser;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use futures::StreamExt;
 use indicatif::{MultiProgress, ProgressBar};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
 
@@ -65,65 +62,6 @@ async fn connect(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
     Ok(peripheral)
 }
 
-async fn manual_move(events: &mut EventStream, brad: &Bradipograph) -> Result<()> {
-    use ManualControl::*;
-    while let Some(ev) = events.next().await.transpose()? {
-        let Event::Key(ev) = ev else {
-            continue;
-        };
-        if ev.kind != KeyEventKind::Press {
-            continue;
-        }
-        let cmd = match ev.code {
-            KeyCode::Char('q') => {
-                return Err(Error::Exit);
-            }
-            KeyCode::Char('s') => Some(Cmd::Manual(ShortenLeft)),
-            KeyCode::Char('d') => Some(Cmd::Manual(StopLeft)),
-            KeyCode::Char('f') => Some(Cmd::Manual(LengthenLeft)),
-            KeyCode::Char('l') => Some(Cmd::Manual(ShortenRight)),
-            KeyCode::Char('k') => Some(Cmd::Manual(StopRight)),
-            KeyCode::Char('j') => Some(Cmd::Manual(LengthenRight)),
-            KeyCode::Enter => {
-                return Ok(());
-            }
-            _ => None,
-        };
-        if let Some(cmd) = cmd {
-            brad.send_cmd(cmd).await?;
-        }
-    }
-    Err(anyhow!("event stream ended").into())
-}
-
-async fn handle_calibration(brad: &Bradipograph) -> Result<()> {
-    eprintln!("Entering calibration mode. Keys s, d, f, j, k, l to move, <enter> to confirm.");
-    eprintln!("Move to the left claw (20cm below, 10cm to the side)");
-    enable_raw_mode()?;
-
-    let err: Result<()> = (|| async move {
-        let mut events = EventStream::new();
-
-        manual_move(&mut events, brad).await?;
-        brad.send_cmd(Cmd::Calibrate(Calibrate::MarkLeft)).await?;
-
-        eprintln!("Move to the right claw (20cm below, 10cm to the side)");
-        manual_move(&mut events, brad).await?;
-        brad.send_cmd_and_wait(Cmd::Calibrate(Calibrate::Finish {
-            y_offset: 20.0,
-            x_offset: 10.0,
-        }))
-        .await?;
-
-        Ok(())
-    })()
-    .await;
-
-    disable_raw_mode()?;
-
-    err
-}
-
 async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let peripheral = connect(adapter).await?;
     let brad = Bradipograph::new(peripheral).await?;
@@ -133,18 +71,15 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
 
     let mut calibration = brad.read_calibration().await?;
     bar.finish_with_message("received!");
-    dbg!(&calibration);
 
     while matches!(calibration, CalibrationStatus::Uncalibrated) {
-        eprintln!("Uncalibrated, entering calibration mode");
-        handle_calibration(&brad).await?;
-
+        eprintln!("Uncalibrated");
+        command_mode(&brad).await?;
         calibration = brad.read_calibration().await?;
     }
     let calib = match &calibration {
         CalibrationStatus::Uncalibrated => unreachable!(),
         CalibrationStatus::Calibrated(c) => c,
-        //CalibrationStatus::CalibratedAndPositioned(c, _) => c,
     };
     let config = ConfigBuilder::default()
         .with_max_hang(calib.max_hang as f64)
@@ -211,24 +146,37 @@ fn read_cmd(reed: &mut Reedline, prompt: &dyn Prompt) -> Result<String> {
     }
 }
 
+fn read_number(reed: &mut Reedline, prompt: &str) -> Result<Option<f32>> {
+    loop {
+        let s = read_cmd(reed, &string_prompt(prompt))?;
+        if s == "q" {
+            return Ok(None);
+        }
+        match s.parse::<f32>() {
+            Ok(x) => return Ok(Some(x)),
+            Err(_) => {
+                eprintln!("That isn't a number; try again, or enter 'q' to go back")
+            }
+        }
+    }
+}
+
 async fn command_mode(brad: &Bradipograph) -> Result<()> {
     let mut reed = Reedline::create();
-    let prompt = DefaultPrompt::default();
+    let prompt = string_prompt("> ");
     loop {
         let s = read_cmd(&mut reed, &prompt)?;
         let s = s.trim();
 
         if s == "quit" {
-            break;
+            return Err(Error::Exit);
+        } else if s == "continue" {
+            return Ok(());
         } else if s == "move" {
-            let x = read_cmd(&mut reed, &string_prompt("x? "))?;
-            let Ok(x) = x.parse::<f32>() else {
-                eprintln!("error: expected a number");
+            let Some(x) = read_number(&mut reed, "x? ")? else {
                 continue;
             };
-            let y = read_cmd(&mut reed, &string_prompt("y? "))?;
-            let Ok(y) = y.parse::<f32>() else {
-                eprintln!("error: expected a number");
+            let Some(y) = read_number(&mut reed, "y? ")? else {
                 continue;
             };
 
@@ -236,10 +184,33 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
         } else if s == "query" {
             let calib = brad.read_calibration().await?;
             eprintln!("calibration: {calib:?}");
+        } else if s == "calibrate" {
+            let Some(d) = read_number(&mut reed, "How far apart (in cm) are the two claws? ")?
+            else {
+                continue;
+            };
+            let Some(left) = read_number(
+                &mut reed,
+                "How far apart (in cm) is the head from the left claw? ",
+            )?
+            else {
+                continue;
+            };
+            let Some(right) = read_number(
+                &mut reed,
+                "How far apart (in cm) is the head from the right claw? ",
+            )?
+            else {
+                continue;
+            };
+            brad.send_cmd_and_wait(Cmd::Calibrate(Calibration {
+                claw_distance_cm: d,
+                left_arm_cm: left,
+                right_arm_cm: right,
+            }))
+            .await?;
         }
     }
-
-    Ok(())
 }
 
 #[tokio::main]

@@ -1,5 +1,3 @@
-use core::cell::RefCell;
-
 use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
@@ -7,14 +5,13 @@ use bleps::{
     async_attribute_server::AttributeServer,
     asynch::Ble,
 };
-use embassy_sync::blocking_mutex::{self, raw::CriticalSectionRawMutex};
 use esp32c3_hal::peripherals::BT;
 use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
 
 use bradipous_protocol::{CalibrationStatus, Cmd};
 
-use crate::{Channel, Sender};
+use crate::{Channel, Sender, GLOBAL};
 
 // TODO: define these in a shared crate
 // const UUID: &str = "68a79627-2609-4569-8d7d-3b29fde28877";
@@ -23,19 +20,6 @@ use crate::{Channel, Sender};
 //pub type CmdReceiver = embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, Cmd, 16>;
 pub type CmdSender = Sender<Cmd, 64>;
 pub type CmdChannel = Channel<Cmd, 64>;
-
-// We need to access part of the main state from within one of the gatt callbacks.
-// We coordinate this with a global mutex.
-pub struct Status {
-    pub calibration: Option<bradipous_protocol::Calibration>,
-    pub position: Option<bradipous_protocol::Position>,
-}
-
-pub static STATUS: blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Status>> =
-    blocking_mutex::Mutex::new(RefCell::new(Status {
-        calibration: None,
-        position: None,
-    }));
 
 #[embassy_executor::task]
 pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: CmdSender) {
@@ -68,10 +52,10 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
             };
 
         let mut calibration_status = |offset: usize, data: &mut [u8]| {
-            let msg = STATUS.lock(|status| match &status.borrow().calibration {
-                Some(calib) => CalibrationStatus::Calibrated(calib.clone()),
+            let msg = match GLOBAL.config() {
+                Some(config) => CalibrationStatus::Calibrated(config.into()),
                 None => CalibrationStatus::Uncalibrated,
-            });
+            };
 
             let buf = heapless::Vec::<u8, 64>::new();
             let buf = postcard::to_extend(&msg, buf).unwrap();
@@ -95,7 +79,8 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
             ],
         },]);
 
-        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes);
+        let mut rng = bleps::no_rng::NoRng;
+        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
         let mut notifier = core::future::pending;
         srv.run(&mut notifier).await.unwrap();
     }
