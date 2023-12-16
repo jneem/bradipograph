@@ -35,6 +35,7 @@ impl Angle {
     }
 }
 
+#[derive(Debug)]
 pub struct ArmLengths {
     pub left: f64,
     pub right: f64,
@@ -170,7 +171,7 @@ impl Config {
     pub fn arm_lengths_to_point(&self, lengths: &ArmLengths) -> Point {
         let x = (square(lengths.left) - square(lengths.right)) / (2.0 * self.claw_distance);
         let y = sqrt(square(lengths.left) - square(self.claw_distance / 2.0 + x));
-        Point::new(x, y)
+        Point::new(x, y - self.hang_offset)
     }
 
     pub fn rotor_angles(&self, lengths: &ArmLengths) -> RotorAngles {
@@ -296,6 +297,17 @@ mod tests {
             let approx_ddfp = dbg!(cfg.df(p + w * 1e-2, v) - dfp) * 1e2;
             assert!((ddfp.x - approx_ddfp.x).abs() < 1e-2);
             assert!((ddfp.y - approx_ddfp.y).abs() < 1e-2);
+        }
+
+        // Check that arm_lengths and arm_lengths_to_point are inverses.
+        #[test]
+        fn test_arm_length_inverse(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64) {
+            let p = Point {x,y};
+            let arms = cfg.arm_lengths(&p);
+            let q = cfg.arm_lengths_to_point(&arms);
+            dbg!(p, q, arms);
+            assert!((p.x - q.x).abs() < 1e-3);
+            assert!((p.y - q.y).abs() < 1e-3);
         }
     }
 }

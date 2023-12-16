@@ -1,3 +1,6 @@
+use libm::sqrtf;
+
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 #[derive(Clone, Copy, Debug)]
 pub struct Position {
     pub left: u16,
@@ -10,16 +13,57 @@ pub struct Velocity {
     pub steps_per_s: u16,
 }
 
+impl Velocity {
+    pub fn from_steps_per_second(steps_per_s: u16) -> Self {
+        Self { steps_per_s }
+    }
+}
+
+#[cfg(test)]
+impl proptest::arbitrary::Arbitrary for Velocity {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Velocity>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        (0u16..(1 << 14))
+            .prop_map(|v| Velocity { steps_per_s: v })
+            .boxed()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Accel {
     // This can go up to 2^18.
     pub steps_per_s_per_s: u32,
 }
 
+#[cfg(test)]
+impl proptest::arbitrary::Arbitrary for Accel {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Accel>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        (0u32..(1 << 18))
+            .prop_map(|v| Accel {
+                steps_per_s_per_s: v,
+            })
+            .boxed()
+    }
+}
+
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 #[derive(Clone, Copy, Debug)]
 pub struct Segment {
     pub steps: Position,
+    /// The initial velocity. This specifies the velocity of the faster
+    /// motor; the velocity of the slower motor will be always be some
+    /// fixed fraction of the faster one.
     pub start_velocity: Velocity,
+    /// The final velocity.
     pub end_velocity: Velocity,
     pub accel: Accel,
 }
@@ -34,6 +78,59 @@ pub struct Tick {
 const MAX_PARAM: u32 = 1 << 24;
 
 impl Segment {
+    /// If a segment is long and the initial and final velocities are both small, the step
+    /// iterator will just move along it very slowly. This is probably not what we want,
+    /// though: we want to accelerate to a higher maximum speed, and then decelerate at
+    /// the end.
+    ///
+    /// This method splits a single segment into two: an acceleration segment and a deceleration
+    /// segment.
+    pub fn split(&self, max_velocity: Velocity) -> Option<(Segment, Segment)> {
+        let start_v = self.start_velocity.steps_per_s as u32;
+        let end_v = self.end_velocity.steps_per_s as u32;
+        let max_v = max_velocity.steps_per_s as u32;
+
+        let square = |x| x * x;
+        // How many steps would it take to get from the initial to the final velocity?
+        let steps = square(start_v).abs_diff(square(end_v)) / (2 * self.accel.steps_per_s_per_s);
+
+        let max_steps = self.steps.left.max(self.steps.right) as u32;
+        if steps <= max_steps / 2 && (start_v <= max_v * 3 / 4 || end_v <= max_v * 3 / 4) {
+            // 2 * max_steps * self.accel.steps_per_s_per_s is the total amount that the squared
+            // velocity can change while traversing this segment. Some of that change must be used
+            // up in getting from the initial velocity to the final velocity. And then the peak energy
+            // as we traverse the segment is half of what's left (since we need to go up and then down).
+            let max_energy = max_steps * self.accel.steps_per_s_per_s
+                - square(start_v).abs_diff(square(end_v)) / 2;
+            let max_velocity = (sqrtf(max_energy as f32) as u32).min(max_v);
+
+            // How may steps will it take to get from the max velocity back down to the final velocity?
+            let decel_steps = (max_energy - square(end_v)) / (2 * self.accel.steps_per_s_per_s);
+
+            let decel_seg = Segment {
+                steps: Position {
+                    left: (self.steps.left as u32 * decel_steps / max_steps) as u16,
+                    right: (self.steps.right as u32 * decel_steps / max_steps) as u16,
+                },
+                start_velocity: Velocity::from_steps_per_second(max_velocity as u16),
+                end_velocity: self.end_velocity,
+                accel: self.accel,
+            };
+            let accel_seg = Segment {
+                steps: Position {
+                    left: self.steps.left - decel_seg.steps.left,
+                    right: self.steps.right - decel_seg.steps.right,
+                },
+                start_velocity: self.start_velocity,
+                end_velocity: Velocity::from_steps_per_second(max_velocity as u16),
+                accel: self.accel,
+            };
+            Some((accel_seg, decel_seg))
+        } else {
+            None
+        }
+    }
+
     pub fn iter_steps(&self) -> StepIter {
         // If either left or right doesn't move, the reciprocal is 1/0. But we can safely
         // replace it by 1, because in this case it will only ever get multiplied by zero.
@@ -43,8 +140,6 @@ impl Segment {
         // There should be a minimum number of steps. If we say 16, it means that this can
         // be at most 2^19.
         let param_per_steps = MAX_PARAM / (self.steps.left.max(self.steps.right) as u32);
-        // TODO: convert from seconds to mebi-microseconds
-        //let s_per_t = U32F32::from(1_000_000u32) / U32F32::from(1024u32 * 1024);
 
         // We impose a minimum velocity so that we don't wait forever until the first step.
         // A sensible value would be sqrt(accel / 2), since that's the velocity after a
@@ -79,8 +174,6 @@ impl Segment {
     }
 }
 
-// Our internal time units here are mebi-microseconds, i.e. 10^20 microseconds.
-// Our public interface uses microseconds.
 #[derive(Debug)]
 pub struct StepIter {
     max_pos: Position,
@@ -156,40 +249,37 @@ impl Iterator for StepIter {
                 .max(self.param_per_t_min)
         };
 
-        // TODO: do we also need to check that self.pos.left < self.max_pos.left?
-        if next_param_left <= next_param {
+        let mut ret = Tick {
+            left: false,
+            right: false,
+            delay_us: ((dt * 1_000_000) >> 32) as u32,
+        };
+        if next_param_left <= next_param && self.pos.left < self.max_pos.left {
             self.pos.left += 1;
+            ret.left = true;
         }
-        if next_param_right <= next_param {
+        if next_param_right <= next_param && self.pos.right < self.max_pos.right {
             self.pos.right += 1;
+            ret.right = true;
         }
 
         self.param = next_param;
-        Some(Tick {
-            left: next_param_left <= next_param,
-            right: next_param_right <= next_param,
-            delay_us: ((dt * 1_000_000) >> 32) as u32,
-        })
+        Some(ret)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
-    // TODO: add a property test checking that the number of steps is always correct.
-    #[test]
-    fn basic() {
-        let seg = Segment {
-            steps: Position {
-                left: 20,
-                right: 19,
-            },
-            start_velocity: Velocity { steps_per_s: 64 },
-            end_velocity: Velocity { steps_per_s: 500 },
-            accel: Accel {
-                steps_per_s_per_s: 8 * 500,
-            },
-        };
+    proptest! {
+        #[test]
+        fn test_step_count(seg: Segment) {
+            let left_counts: u16 = seg.iter_steps().map(|t| u16::from(t.left)).sum();
+            let right_counts: u16 = dbg!(seg.iter_steps()).map(|t| u16::from(t.right)).sum();
+            assert_eq!(left_counts, seg.steps.left);
+            assert_eq!(right_counts, seg.steps.right);
+        }
     }
 }

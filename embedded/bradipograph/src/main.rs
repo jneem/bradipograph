@@ -4,7 +4,7 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{Config, ConfigBuilder};
+use bradipous_geom::{ArmLengths, Config, ConfigBuilder, StepperPositions};
 use bradipous_planner::stepper::{Accel, Velocity};
 use bradipous_protocol::{Calibration, Cmd};
 use embassy_executor::Spawner;
@@ -107,8 +107,8 @@ impl GlobalState {
     }
 }
 
-fn apply_calibration(global: &GlobalState, calib: Calibration) {
-    let radius = 1.3;
+fn apply_calibration(global: &GlobalState, calib: Calibration) -> Config {
+    let radius = 1.4;
 
     let config = ConfigBuilder::default()
         .with_claw_distance(calib.claw_distance_cm as f64)
@@ -116,12 +116,19 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) {
         .with_max_hang(30.0)
         .build();
 
+    let pos = config.arm_lengths_to_point(&ArmLengths {
+        left: calib.left_arm_cm as f64,
+        right: calib.right_arm_cm as f64,
+    });
+
     global.set_config(config);
+    global.set_position(pos);
+    config
 }
 
 async fn calibrated_control(cmds: Receiver<Cmd, 64>, left: &mut Stepper, right: &mut Stepper) {
     let maybe_point = GLOBAL.position();
-    let maybe_config = GLOBAL.config();
+    let mut maybe_config = GLOBAL.config();
     let mut maybe_steps = maybe_point
         .zip(maybe_config)
         .map(|(p, c)| c.point_to_steps(&p));
@@ -136,7 +143,7 @@ async fn calibrated_control(cmds: Receiver<Cmd, 64>, left: &mut Stepper, right: 
                 // TODO: validate that the point is within range
                 let p = Point::new(x as f64, y as f64);
                 let target_steps = config.point_to_steps(&p);
-                println!("move to (x, y), steps {target_steps:?}");
+                println!("move to (x, y), steps {steps:?} -> {target_steps:?}");
                 let right_count = target_steps.right.abs_diff(steps.right);
                 let left_count = target_steps.left.abs_diff(steps.left);
 
@@ -216,8 +223,17 @@ async fn calibrated_control(cmds: Receiver<Cmd, 64>, left: &mut Stepper, right: 
                 maybe_steps = Some(config.point_to_steps(&p));
             }
             Cmd::Calibrate(calibration) => {
-                apply_calibration(&GLOBAL, calibration);
-                maybe_steps = None;
+                let config = apply_calibration(&GLOBAL, calibration);
+                maybe_config = Some(config);
+
+                let circumference = config.spool_radius * core::f64::consts::PI * 2.0;
+
+                maybe_steps = Some(StepperPositions {
+                    left: (calibration.left_arm_cm as f64 / circumference
+                        * config.steps_per_revolution) as u32,
+                    right: (calibration.right_arm_cm as f64 / circumference
+                        * config.steps_per_revolution) as u32,
+                });
             }
             _ => {
                 println!("unexpected cmd in calibrated mode");

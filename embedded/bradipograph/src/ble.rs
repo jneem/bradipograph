@@ -9,7 +9,7 @@ use esp32c3_hal::peripherals::BT;
 use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
 
-use bradipous_protocol::{CalibrationStatus, Cmd};
+use bradipous_protocol::{CalibrationStatus, Cmd, Position};
 
 use crate::{Channel, Sender, GLOBAL};
 
@@ -52,9 +52,19 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
             };
 
         let mut calibration_status = |offset: usize, data: &mut [u8]| {
-            let msg = match GLOBAL.config() {
-                Some(config) => CalibrationStatus::Calibrated(config.into()),
-                None => CalibrationStatus::Uncalibrated,
+            let msg = match (GLOBAL.config(), GLOBAL.position()) {
+                (Some(config), Some(pos)) => {
+                    let arm_lengths = config.arm_lengths(&pos);
+                    let pos = Position {
+                        x: pos.x as f32,
+                        y: pos.y as f32,
+                        left_arm_length: arm_lengths.left as f32,
+                        right_arm_length: arm_lengths.right as f32,
+                    };
+                    CalibrationStatus::CalibratedAndPositioned(config.into(), pos)
+                }
+                (Some(config), None) => CalibrationStatus::Calibrated(config.into()),
+                _ => CalibrationStatus::Uncalibrated,
             };
 
             let buf = heapless::Vec::<u8, 64>::new();
@@ -83,5 +93,6 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
         let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
         let mut notifier = core::future::pending;
         srv.run(&mut notifier).await.unwrap();
+        println!("finished serving, restarting");
     }
 }

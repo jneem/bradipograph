@@ -54,13 +54,13 @@ impl From<bradipous_geom::Config> for Config {
 pub struct Position {
     pub x: f32,
     pub y: f32,
-    pub left: u32,
-    pub right: u32,
+    pub left_arm_length: f32,
+    pub right_arm_length: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CalibrationStatus {
     Uncalibrated,
     Calibrated(Config),
-    //CalibratedAndPositioned(Calibration, Position),
+    CalibratedAndPositioned(Config, Position),
 }

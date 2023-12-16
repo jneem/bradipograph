@@ -80,7 +80,9 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let calib = match &calibration {
         CalibrationStatus::Uncalibrated => unreachable!(),
         CalibrationStatus::Calibrated(c) => c,
+        CalibrationStatus::CalibratedAndPositioned(c, _) => c,
     };
+    eprintln!("Calibration {calibration:?}");
     let config = ConfigBuilder::default()
         .with_max_hang(calib.max_hang as f64)
         .with_spool_radius(calib.spool_radius as f64)
@@ -134,7 +136,7 @@ async fn send_file(
 fn string_prompt(s: &str) -> DefaultPrompt {
     DefaultPrompt::new(
         DefaultPromptSegment::Basic(s.to_owned()),
-        DefaultPromptSegment::Basic(s.to_owned()),
+        DefaultPromptSegment::Empty,
     )
 }
 
@@ -163,7 +165,7 @@ fn read_number(reed: &mut Reedline, prompt: &str) -> Result<Option<f32>> {
 
 async fn command_mode(brad: &Bradipograph) -> Result<()> {
     let mut reed = Reedline::create();
-    let prompt = string_prompt("> ");
+    let prompt = string_prompt("");
     loop {
         let s = read_cmd(&mut reed, &prompt)?;
         let s = s.trim();
@@ -173,10 +175,10 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
         } else if s == "continue" {
             return Ok(());
         } else if s == "move" {
-            let Some(x) = read_number(&mut reed, "x? ")? else {
+            let Some(x) = read_number(&mut reed, "x")? else {
                 continue;
             };
-            let Some(y) = read_number(&mut reed, "y? ")? else {
+            let Some(y) = read_number(&mut reed, "y")? else {
                 continue;
             };
 
@@ -209,6 +211,8 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
                 right_arm_cm: right,
             }))
             .await?;
+        } else {
+            eprintln!("unknown command");
         }
     }
 }
