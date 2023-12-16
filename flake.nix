@@ -24,7 +24,7 @@
           fx.latest.rust-src
           fx.targets.riscv32imc-unknown-none-elf.latest.rust-std
         ];
-        python-toolchain = pkgs.python3.withPackages (ps: [ps.bleak]);
+        python-toolchain = pkgs.python3.withPackages (ps: [ps.bleak ps.matplotlib ps.numpy ps.tornado]);
       in
       {
         devShell = pkgs.mkShell {

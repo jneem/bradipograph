@@ -46,7 +46,7 @@ static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::ne
 
 const FLASH_ADDR: u32 = 0x110000;
 
-const MAX_STEPS_PER_SEC: u32 = 500;
+const MAX_STEPS_PER_SEC: u32 = 300;
 // what fraction of a second does it take to reach max velocity
 const MAX_VELOCITY_PER_SEC: u32 = 8;
 const MAX_ACCEL: u32 = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
@@ -146,48 +146,24 @@ async fn calibrated_control(cmds: Receiver<Cmd, 64>, left: &mut Stepper, right: 
                 println!("move to (x, y), steps {steps:?} -> {target_steps:?}");
                 let right_count = target_steps.right.abs_diff(steps.right);
                 let left_count = target_steps.left.abs_diff(steps.left);
-
-                let max_count = right_count.max(left_count);
-                let steps_to_full_v = MAX_STEPS_PER_SEC / MAX_VELOCITY_PER_SEC;
-
-                let decel_steps = steps_to_full_v.min(max_count / 2);
-                let decel = bradipous_planner::stepper::Position {
-                    left: (left_count * decel_steps / max_count) as u16,
-                    right: (right_count * decel_steps / max_count) as u16,
-                };
-                let accel = bradipous_planner::stepper::Position {
-                    left: left_count as u16 - decel.left,
-                    right: right_count as u16 - decel.right,
-                };
-
-                let max_velocity = libm::sqrtf((decel_steps * MAX_ACCEL) as f32) as u32;
-                let max_velocity = Velocity {
-                    steps_per_s: max_velocity.min(MAX_STEPS_PER_SEC) as u16,
-                };
                 let min_velocity = Velocity {
-                    steps_per_s: libm::sqrtf(MAX_ACCEL as f32 / 2.0) as u16,
+                    steps_per_s: libm::sqrtf(2.0 * MAX_ACCEL as f32) as u16,
                 };
-
-                let accel_seg = bradipous_planner::stepper::Segment {
-                    steps: accel,
-                    start_velocity: min_velocity,
-                    end_velocity: max_velocity,
-                    accel: Accel {
-                        steps_per_s_per_s: MAX_ACCEL,
+                let max_velocity = Velocity {
+                    steps_per_s: MAX_STEPS_PER_SEC as u16,
+                };
+                let seg = bradipous_planner::stepper::Segment {
+                    steps: bradipous_planner::stepper::Position {
+                        left: left_count as u16,
+                        right: right_count as u16,
                     },
-                };
-                println!("accel segment {:?}", accel_seg.iter_steps());
-                for tick in accel_seg.iter_steps().take(10) {
-                    println!("tick: {tick:?}");
-                }
-                let decel_seg = bradipous_planner::stepper::Segment {
-                    steps: decel,
-                    start_velocity: max_velocity,
+                    start_velocity: min_velocity,
                     end_velocity: min_velocity,
                     accel: Accel {
                         steps_per_s_per_s: MAX_ACCEL,
                     },
                 };
+                let (accel, decel) = seg.split(max_velocity).unwrap();
 
                 let right_dir = if target_steps.right > steps.right {
                     Direction::Clockwise
@@ -200,7 +176,7 @@ async fn calibrated_control(cmds: Receiver<Cmd, 64>, left: &mut Stepper, right: 
                     Direction::Clockwise
                 };
 
-                for tick in accel_seg.iter_steps().chain(decel_seg.iter_steps()) {
+                for tick in accel.iter_steps().chain(decel.iter_steps()) {
                     if tick.left {
                         left.step(left_dir);
                     }

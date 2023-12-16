@@ -105,7 +105,8 @@ impl Segment {
             let max_velocity = (sqrtf(max_energy as f32) as u32).min(max_v);
 
             // How may steps will it take to get from the max velocity back down to the final velocity?
-            let decel_steps = (max_energy - square(end_v)) / (2 * self.accel.steps_per_s_per_s);
+            let decel_steps =
+                (square(max_velocity) - square(end_v)) / (2 * self.accel.steps_per_s_per_s);
 
             let decel_seg = Segment {
                 steps: Position {
@@ -132,10 +133,15 @@ impl Segment {
     }
 
     pub fn iter_steps(&self) -> StepIter {
-        // If either left or right doesn't move, the reciprocal is 1/0. But we can safely
-        // replace it by 1, because in this case it will only ever get multiplied by zero.
-        let recip_left_steps = MAX_PARAM.checked_div(self.steps.left as u32).unwrap_or(1);
-        let recip_right_steps = MAX_PARAM.checked_div(self.steps.right as u32).unwrap_or(1);
+        // If either left or right doesn't move, the reciprocal is 1/0. By replacing it by MAX_PARAM,
+        // we ensure that the this stepper never wins the "minimum" test that would mark it as the
+        // next stepper to move.
+        let recip_left_steps = MAX_PARAM
+            .checked_div(self.steps.left as u32)
+            .unwrap_or(MAX_PARAM);
+        let recip_right_steps = MAX_PARAM
+            .checked_div(self.steps.right as u32)
+            .unwrap_or(MAX_PARAM);
 
         // There should be a minimum number of steps. If we say 16, it means that this can
         // be at most 2^19.
@@ -168,7 +174,7 @@ impl Segment {
             param_per_t_min: start_param_per_t.min(end_param_per_t),
             param_per_t_max: start_param_per_t.max(end_param_per_t),
             param_per_t_per_t,
-            debounce: recip_right_steps.min(recip_left_steps) / 8,
+            debounce: recip_right_steps.min(recip_left_steps) / 16,
             speeding_up: end_param_per_t > start_param_per_t,
         }
     }
@@ -177,7 +183,6 @@ impl Segment {
 #[derive(Debug)]
 pub struct StepIter {
     max_pos: Position,
-
     // Current position.
     pos: Position,
 
@@ -209,25 +214,25 @@ impl Iterator for StepIter {
     type Item = Tick;
 
     fn next(&mut self) -> Option<Tick> {
-        if self.param == MAX_PARAM {
+        if self.pos.left >= self.max_pos.left && self.pos.right >= self.max_pos.right {
             return None;
         }
 
-        let next_left = (self.pos.left + 1).min(self.max_pos.left);
-        let next_param_left = next_left as u32 * self.recip_left_steps;
-        let next_right = (self.pos.right + 1).min(self.max_pos.right);
-        let next_param_right = next_right as u32 * self.recip_right_steps;
-
-        let next_param = match (
-            next_right >= self.max_pos.right,
-            next_left >= self.max_pos.left,
-        ) {
-            (true, true) => MAX_PARAM,
-            (true, false) => next_param_left,
-            (false, true) => next_param_right,
-            (false, false) => next_param_left.min(next_param_right),
+        let next_left = self.pos.left + 1;
+        let next_param_left = if next_left > self.max_pos.left {
+            MAX_PARAM
+        } else {
+            next_left as u32 * self.recip_left_steps
         };
-        let max_next_param = next_param_left.max(next_param_right).max(next_param);
+        let next_right = self.pos.right + 1;
+        let next_param_right = if next_right > self.max_pos.right {
+            MAX_PARAM
+        } else {
+            next_right as u32 * self.recip_right_steps
+        };
+
+        let next_param = next_param_right.min(next_param_left);
+        let max_next_param = next_param_left.max(next_param_right);
         let next_param = if max_next_param <= next_param + self.debounce {
             max_next_param
         } else {
@@ -273,13 +278,48 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    fn left_delays(seg: &Segment) -> Vec<u32> {
+        let mut ret = Vec::new();
+        let mut last_t = 0;
+        for step in seg.iter_steps() {
+            last_t += step.delay_us;
+            if step.left {
+                ret.push(last_t);
+                last_t = 0;
+            }
+        }
+        ret
+    }
+
     proptest! {
         #[test]
         fn test_step_count(seg: Segment) {
             let left_counts: u16 = seg.iter_steps().map(|t| u16::from(t.left)).sum();
-            let right_counts: u16 = dbg!(seg.iter_steps()).map(|t| u16::from(t.right)).sum();
+            let right_counts: u16 = seg.iter_steps().map(|t| u16::from(t.right)).sum();
             assert_eq!(left_counts, seg.steps.left);
             assert_eq!(right_counts, seg.steps.right);
+        }
+
+        // Ensure that when moving at a constant velocity, the delays between
+        // ticks are approximately as expected.
+        #[test]
+        fn expected_velocities(mut seg: Segment) {
+            seg.start_velocity = Velocity::from_steps_per_second(500);
+            seg.end_velocity = Velocity::from_steps_per_second(500);
+            let delays = left_delays(&seg);
+
+            let left_ratio = if seg.steps.left > seg.steps.right {
+                1.0
+            } else {
+                seg.steps.left as f64 / seg.steps.right as f64
+            };
+            let left_steps_per_second = seg.start_velocity.steps_per_s as f64 * left_ratio;
+            let us_per_step = 1_000_000.0 / left_steps_per_second;
+
+            let mean_deviation = delays.iter().map(|&d| (d as f64 - us_per_step).abs()).sum::<f64>() / delays.len() as f64;
+            let max_deviation = delays.iter().map(|&d| (d as f64 - us_per_step).abs()).max_by(|x, y| x.total_cmp(y)).unwrap();
+            assert!(mean_deviation < us_per_step / 16.0);
+            assert!(max_deviation < us_per_step / 10.0);
         }
     }
 }
