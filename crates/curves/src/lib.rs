@@ -4,7 +4,7 @@
 use heapless::Vec;
 use kurbo::{PathEl, PathSeg, Vec2};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Pt {
     pub x: f32,
     pub y: f32,
@@ -38,7 +38,7 @@ impl From<Pt> for () {
     fn from(_p: Pt) {}
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Inst {
     MoveTo,
     LineTo,
@@ -64,7 +64,7 @@ impl From<Inst> for () {
     fn from(_p: Inst) {}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CurveIdx {
     /// Index into the array of instructions.
     pub inst_idx: u16,
@@ -81,7 +81,7 @@ impl From<CurveIdx> for () {
     fn from(_p: CurveIdx) {}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Curve<const CAP: usize> {
     pub pts: Vec<Pt, CAP>,
     // We could have different capacities for points and instructions. Since the
@@ -95,6 +95,7 @@ pub struct Curve<const CAP: usize> {
     pub smooth_boundaries: Vec<CurveIdx, CAP>,
 }
 
+// TODO: a function to split a curve into multiple curves with a smaller capacity.
 impl<const CAP: usize> Curve<CAP> {
     pub fn extend(&mut self, path: &[PathEl]) -> Result<(), ()> {
         let PathEl::MoveTo(start_point) = path.first().ok_or(())? else {

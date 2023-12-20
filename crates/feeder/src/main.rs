@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use bradipous_curves::Curve;
 use bradipous_geom::ConfigBuilder;
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
@@ -110,25 +111,16 @@ async fn send_file(
     let mut paths = svg::load_svg(path)?;
 
     svg::transform(&mut paths, config);
-    let mut points = Vec::new();
+    // TODO: support a bigger curve, and break it into pieces before sending.
+    let mut curve = Curve::<32>::default();
     for p in &paths {
-        let mut my_points = Vec::new();
-        p.flatten(0.5, |el| match el {
-            kurbo::PathEl::MoveTo(pt) => my_points.push(pt),
-            kurbo::PathEl::LineTo(pt) => my_points.push(pt),
-            kurbo::PathEl::ClosePath => my_points.push(my_points[0]),
-            _ => unreachable!(),
-        });
-        points.extend_from_slice(&my_points);
+        if curve.extend(p.elements()).is_err() {
+            eprintln!("This curve is too complicated! Truncating it.");
+            break;
+        }
     }
 
-    if points.len() > 64 {
-        Err(anyhow!("{} points is too many :(", points.len()))?;
-    }
-
-    for p in points {
-        brad.send_cmd(Cmd::MoveTo(p.x as f32, p.y as f32)).await?;
-    }
+    brad.send_cmd(Cmd::Draw(curve)).await?;
 
     Ok(())
 }

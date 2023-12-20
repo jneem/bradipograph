@@ -110,6 +110,7 @@ impl Segment {
 
             let decel_seg = Segment {
                 steps: Position {
+                    // FIXME: don't crash on an empty segment
                     left: (self.steps.left as u32 * decel_steps / max_steps) as u16,
                     right: (self.steps.right as u32 * decel_steps / max_steps) as u16,
                 },
@@ -145,6 +146,7 @@ impl Segment {
 
         // There should be a minimum number of steps. If we say 16, it means that this can
         // be at most 2^19.
+        // FIXME: don't crash on an empty segment
         let param_per_steps = MAX_PARAM / (self.steps.left.max(self.steps.right) as u32);
 
         // We impose a minimum velocity so that we don't wait forever until the first step.

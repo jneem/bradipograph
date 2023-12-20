@@ -29,3 +29,4 @@ num-derive = { version = "0.4.1", default-features = false }
 num-traits = { version = "0.2.17", default-features = false }
 postcard = "1.0.8"
 serde = { version = "1.0.193", default-features = false, features = ["derive"] }
+static_cell = "2.0.0"

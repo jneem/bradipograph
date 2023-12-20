@@ -4,9 +4,10 @@ use std::{
 };
 
 use bradipous_curves::Curve;
-use bradipous_planner::{MotionCurve, PlannerConfig, Transform};
+use bradipous_geom::ConfigBuilder;
+use bradipous_planner::{MotionCurve, PlannerConfig};
 use clap::Parser as _;
-use kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
+use kurbo::{Affine, BezPath, Rect, Shape};
 use usvg::{tiny_skia_path::PathSegment, TreeParsing};
 
 #[derive(clap::Parser)]
@@ -37,12 +38,14 @@ pub fn main() -> anyhow::Result<()> {
         .reduce(|b1, b2| b1.union(b2))
         .unwrap();
 
-    let target_bbox = BrachioTransform::input_range();
+    let geom_config = ConfigBuilder::default()
+        .with_claw_distance(100.0)
+        .with_max_hang(50.0)
+        .build();
+    let target_bbox = Rect::new(-50.0, 0.0, 50.0, 50.0);
     let scale = (target_bbox.height() / bbox.height()).min(target_bbox.width() / bbox.width());
 
     let transform = Affine::translate(-bbox.center().to_vec2())
-        // SVG has positive y pointing down; we have positive y pointing up.
-        .then_scale_non_uniform(1.0, -1.0)
         .then_scale(scale)
         .then_translate(target_bbox.center().to_vec2());
 
@@ -60,7 +63,7 @@ pub fn main() -> anyhow::Result<()> {
     for p in paths.iter() {
         curve.extend(p.elements()).unwrap();
     }
-    let m = MotionCurve::<1024>::plan(&curve, &config, &BrachioTransform);
+    let m = MotionCurve::<1024>::plan(&curve, &config, &geom_config);
     let out = File::create(&args.output)?;
 
     serde_json::to_writer(out, &m)?;
@@ -110,61 +113,4 @@ fn load_svg(path: &Path) -> anyhow::Result<Vec<BezPath>> {
         }
     }
     Ok(ret)
-}
-
-#[derive(Clone, Copy)]
-pub struct BrachioTransform;
-
-impl BrachioTransform {
-    pub fn input_range() -> Rect {
-        Rect::new(-1.0, 3.0 / 8.0, 1.0, 13.0 / 8.0)
-    }
-}
-
-impl Transform for BrachioTransform {
-    fn f(&self, input: Point) -> Point {
-        let theta = input.to_vec2().atan2();
-        let r2 = input.to_vec2().hypot2();
-        let elbow = (1.0 - r2 / 2.0).clamp(-1.0, 1.0).asin();
-        let shoulder = 3.0 * std::f64::consts::PI / 4.0 - theta + elbow / 2.0;
-        Point::new(elbow, shoulder)
-    }
-
-    fn df(&self, input: Point, direction: Vec2) -> Vec2 {
-        let r = input.to_vec2().hypot();
-        let r2 = input.to_vec2().hypot2();
-        let Point { x, y } = input;
-        let elbow_x = -x / (r * (1. - r2 / 4.).sqrt());
-        let elbow_y = -y / (r * (1. - r2 / 4.).sqrt());
-        let shoulder_x = y / r2 + elbow_x / 2.;
-        let shoulder_y = -x / r2 + elbow_y / 2.;
-
-        let Vec2 { x: dx, y: dy } = direction;
-        Vec2::new(
-            elbow_x * dx + elbow_y * dy,
-            shoulder_x * dx + shoulder_y * dy,
-        )
-    }
-
-    fn ddf(&self, input: Point, u: Vec2, v: Vec2) -> Vec2 {
-        let r = input.to_vec2().hypot();
-        let r2 = input.to_vec2().hypot2();
-        let Point { x, y } = input;
-
-        let denom = r2 * r * (1. - r2 / 4.).powf(1.5);
-        let elbow_xx = (x * x * (1. - r2 / 2.) - r2 * (1. - r2 / 4.)) / denom;
-        let elbow_yy = (y * y * (1. - r2 / 2.) - r2 * (1. - r2 / 4.)) / denom;
-        let elbow_xy = x * y * (1. - r2 / 2.) / denom;
-
-        let shoulder_xx = -2. * x * y / (r2 * r2) + elbow_xx / 2.;
-        let shoulder_yy = -2. * x * y / (r2 * r2) + elbow_yy / 2.;
-        let shoulder_xy = (x * x - y * y) / (r2 * r2) + elbow_xy / 2.;
-
-        Vec2::new(
-            elbow_xx * u.x * v.x + elbow_xy * (u.x * v.y + u.y * v.x) + elbow_yy * u.y * v.y,
-            shoulder_xx * u.x * v.x
-                + shoulder_xy * (u.x * v.y + u.y * v.x)
-                + shoulder_yy * u.y * v.y,
-        )
-    }
 }

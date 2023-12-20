@@ -17,6 +17,7 @@ fixed = "1.24.0"
 
 [dev-dependencies]
 anyhow = "1.0.75"
+bradipous-geom = { path = "../geom" }
 clap = { version = "4.4.7", features = ["derive"] }
 proptest = "1.4.0"
 proptest-derive = "0.4.0"

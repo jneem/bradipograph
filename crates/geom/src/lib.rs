@@ -68,6 +68,7 @@ pub struct ConfigBuilder {
     claw_distance: f64,
     spool_radius: f64,
     steps_per_revolution: f64,
+    side_inset: f64,
 }
 
 impl Default for ConfigBuilder {
@@ -78,6 +79,7 @@ impl Default for ConfigBuilder {
             claw_distance: 100.0,
             spool_radius: 2.0,
             steps_per_revolution: 2036.0,
+            side_inset: 10.0,
         }
     }
 }
@@ -91,6 +93,7 @@ impl ConfigBuilder {
             max_hang: self.max_hang,
             steps_per_revolution: self.steps_per_revolution,
             hang_offset: self.claw_distance * tan(self.min_angle.radians()),
+            side_inset: self.side_inset,
         }
     }
 
@@ -147,6 +150,10 @@ pub struct Config {
     // our (0, 0) coordinate is in the middle of the two claws, hanging
     // below them by `hang_offset`.
     pub hang_offset: f64,
+
+    // We can't effectively draw right under the claws. How much horizontal
+    // buffer space should we give?
+    pub side_inset: f64,
 }
 
 impl Config {
@@ -194,6 +201,15 @@ impl Config {
         let arms = self.arm_lengths(p);
         let angles = self.rotor_angles(&arms);
         self.stepper_steps(&angles)
+    }
+
+    pub fn bbox(&self) -> Rect {
+        Rect::new(
+            -self.claw_distance / 2.0 + self.side_inset,
+            0.0,
+            self.claw_distance / 2.0 - self.side_inset,
+            self.max_hang,
+        )
     }
 }
 
@@ -263,6 +279,7 @@ mod tests {
                     max_hang: 100.0,
                     steps_per_revolution: 2036.0,
                     hang_offset: h,
+                    side_inset: d / 10.0,
                 })
                 .boxed()
         }

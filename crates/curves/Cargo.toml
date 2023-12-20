@@ -11,3 +11,4 @@ std = []
 heapless = { version = "0.8.0", features = ["serde"] }
 kurbo = { workspace = true, default-features = false, features = ["libm"] }
 libm = "0.2.8"
+serde = { version = "1.0.193", default-features = false, features = ["derive"] }

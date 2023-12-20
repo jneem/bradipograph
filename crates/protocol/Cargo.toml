@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bradipous-curves = { version = "0.1.0", path = "../curves", default-features = false }
 bradipous-geom = { version = "0.1.0", path = "../geom", default-features = false }
 serde = { version = "1.0.193", default-features = false, features = ["derive"] }

@@ -1,5 +1,6 @@
 #![no_std]
 
+use bradipous_curves::Curve;
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +21,7 @@ pub struct Calibration {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Cmd {
     Manual(ManualControl),
     Calibrate(Calibration),
@@ -27,6 +29,7 @@ pub enum Cmd {
     SetPos(f32, f32),
     // Temporary, to test calibration
     MoveTo(f32, f32),
+    Draw(Curve<32>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

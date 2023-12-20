@@ -161,6 +161,7 @@ dependencies = [
  "num-traits",
  "postcard",
  "serde",
+ "static_cell",
 ]
 
 [[package]]
@@ -170,6 +171,7 @@ dependencies = [
  "heapless 0.8.0",
  "kurbo",
  "libm",
+ "serde",
 ]
 
 [[package]]
@@ -198,6 +200,7 @@ dependencies = [
 name = "bradipous-protocol"
 version = "0.1.0"
 dependencies = [
+ "bradipous-curves",
  "bradipous-geom",
  "serde",
 ]
@@ -1365,6 +1368,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "static_cell"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa6ba4cf83bf80d3eb25f098ea5e790a0a1fcb5e357442259b231e412c2d3ca0"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "strsim"

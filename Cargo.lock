@@ -227,10 +227,11 @@ dependencies = [
  "heapless 0.8.0",
  "kurbo 0.10.4",
  "libm",
+ "serde",
 ]
 
 [[package]]
-name = "bradipous-feeder2"
+name = "bradipous-feeder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -268,6 +269,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bradipous-curves",
+ "bradipous-geom",
  "clap",
  "fixed",
  "heapless 0.8.0",
@@ -284,6 +286,7 @@ dependencies = [
 name = "bradipous-protocol"
 version = "0.1.0"
 dependencies = [
+ "bradipous-curves",
  "bradipous-geom",
  "serde",
 ]
