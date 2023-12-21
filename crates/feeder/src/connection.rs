@@ -52,6 +52,8 @@ impl Bradipograph {
 
     pub async fn send_cmd_and_wait(&self, cmd: Cmd) -> anyhow::Result<()> {
         let buf = postcard::to_allocvec(&cmd)?;
+        // TODO: if the bradipous has a full buffer, wait and retry
+        // (need to figure out what the returned error has in it...)
         self.peripheral
             .write(&self.control, &buf, WriteType::WithResponse)
             .await?;

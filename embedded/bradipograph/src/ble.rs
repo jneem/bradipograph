@@ -46,9 +46,15 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmds: 
                     println!("got command {cmd:?}");
                     if let Err(cmd) = cmds.try_send(cmd) {
                         println!("dropped command {cmd:?}");
+                        Err(bleps::att::AttErrorCode::InsufficientResources)
+                    } else {
+                        Ok(())
                     }
                 }
-                Err(e) => println!("error: failed to deserialize command {data:?}: {e}"),
+                Err(e) => {
+                    println!("error: failed to deserialize command {data:?}: {e}");
+                    Err(bleps::att::AttErrorCode::UnlikelyError)
+                }
             };
 
         let mut calibration_status = |offset: usize, data: &mut [u8]| {

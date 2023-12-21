@@ -5,11 +5,8 @@
 use core::cell::Cell;
 
 use bradipous_geom::{ArmLengths, Config, ConfigBuilder, StepperPositions};
-use bradipous_planner::{
-    stepper::{Accel, Velocity},
-    MotionCurve, PlannerConfig,
-};
-use bradipous_protocol::{Calibration, Cmd};
+use bradipous_planner::stepper::{Accel, Velocity};
+use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Duration, Timer};
@@ -31,7 +28,6 @@ use esp_storage::FlashStorage;
 use esp_wifi::EspWifiInitFor;
 use espilepsy::Color;
 use kurbo::Point;
-use libm::sqrtf;
 use servo::Servo;
 use stepper::{Direction, Stepper};
 
@@ -60,8 +56,8 @@ static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::ne
 
 const FLASH_ADDR: u32 = 0x110000;
 
+// TODO: these should be part of the config
 const MAX_STEPS_PER_SEC: u32 = 300;
-const MAX_REVS_PER_SEC: f64 = MAX_STEPS_PER_SEC as f64 / 2036.0;
 // what fraction of a second does it take to reach max velocity
 const MAX_VELOCITY_PER_SEC: u32 = 8;
 const MAX_ACCEL: u32 = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
@@ -197,6 +193,42 @@ async fn move_to(
     (target_steps, p)
 }
 
+async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) {
+    // TODO: unify protocol::StepperSegment and planner::stepper::Segment
+    let seg2 = bradipous_planner::stepper::Segment {
+        steps: bradipous_planner::stepper::Position {
+            left: seg.left_steps.unsigned_abs() as u16,
+            right: seg.right_steps.unsigned_abs() as u16,
+        },
+        start_velocity: Velocity::from_steps_per_second(seg.start_steps_per_sec),
+        end_velocity: Velocity::from_steps_per_second(seg.end_steps_per_sec),
+        accel: Accel {
+            steps_per_s_per_s: MAX_ACCEL,
+        },
+    };
+
+    let right_dir = if seg.right_steps > 0 {
+        Direction::Clockwise
+    } else {
+        Direction::CounterClockwise
+    };
+    let left_dir = if seg.left_steps > 0 {
+        Direction::CounterClockwise
+    } else {
+        Direction::Clockwise
+    };
+
+    for tick in seg2.iter_steps() {
+        if tick.left {
+            left.step(left_dir);
+        }
+        if tick.right {
+            right.step(right_dir);
+        }
+        Timer::after_micros(tick.delay_us.into()).await;
+    }
+}
+
 async fn calibrated_control(
     cmds: Receiver<Cmd, 64>,
     left: &mut Stepper,
@@ -211,70 +243,28 @@ async fn calibrated_control(
     let mut maybe_steps = maybe_point
         .zip(maybe_config)
         .map(|(p, c)| c.point_to_steps(&p));
-    'cmd: loop {
+    loop {
         match cmds.receive().await {
-            Cmd::Draw(curve) => {
+            Cmd::Segment(seg) => {
                 let Some((config, mut steps)) = maybe_config.zip(maybe_steps) else {
                     println!("cannot move without a calibration and a position");
                     continue;
                 };
-                let planner = PlannerConfig {
-                    max_energy: MAX_REVS_PER_SEC * MAX_REVS_PER_SEC,
-                    max_acceleration: MAX_REVS_PER_SEC / 16.0,
-                    accuracy: 0.05,
-                };
-                let bbox = config.bbox();
-                for p in &curve.pts {
-                    if !bbox.contains(Point::from(*p)) {
-                        println!("point ({}, {}) is out of bounds", p.x, p.y);
-                        continue 'cmd;
-                    }
-                }
-                let mut final_point = None;
-                let mut pen_is_up = true;
-                for subcurve in curve.subcurves() {
-                    let mut last_velocity = min_velocity;
-                    let Some(m) = MotionCurve::<1024>::plan(&curve, &planner, &config) else {
-                        println!("error planning the curve");
-                        continue;
-                    };
-                    let move_first = subcurve.insts.first().map_or(false, |i| !i.is_draw());
-                    for (i, (pt, energy)) in m.points.iter().zip(&m.energies).enumerate() {
-                        if i == 0 && move_first {
-                            // Set pen up before moving
-                            servo.set_angle(90);
-                            pen_is_up = true;
-                            Timer::after_millis(50).await;
-                        } else if pen_is_up {
-                            // Pen is up, but it should be down.
-                            servo.set_angle(180);
-                            pen_is_up = false;
-                            Timer::after_millis(50).await;
-                        }
 
-                        let end_velocity = Velocity {
-                            steps_per_s: sqrtf(*energy as f32) as u16,
-                        };
-                        let (next_steps, p) = move_to(
-                            &config,
-                            steps,
-                            pt.x as f32,
-                            pt.y as f32,
-                            last_velocity,
-                            end_velocity,
-                            left,
-                            right,
-                        )
-                        .await;
-                        last_velocity = end_velocity;
-                        steps = next_steps;
-                        final_point = Some(p);
-                    }
-                }
+                steps.left = steps.left.checked_add_signed(seg.left_steps).unwrap();
+                steps.right = steps.right.checked_add_signed(seg.right_steps).unwrap();
                 maybe_steps = Some(steps);
-                if let Some(p) = final_point {
-                    GLOBAL.set_position(p);
-                }
+
+                move_seg(seg, left, right).await;
+
+                // TODO: we don't really need to track the current point...
+                let circumference = config.spool_radius * core::f64::consts::PI * 2.0;
+                let arm_lengths = ArmLengths {
+                    left: steps.left as f64 / config.steps_per_revolution * circumference,
+                    right: steps.right as f64 / config.steps_per_revolution * circumference,
+                };
+                let p = config.arm_lengths_to_point(&arm_lengths);
+                GLOBAL.set_position(p);
             }
             Cmd::MoveTo(x, y) => {
                 let Some((config, steps)) = maybe_config.zip(maybe_steps) else {
@@ -317,6 +307,14 @@ async fn calibrated_control(
                     right: (calibration.right_arm_cm as f64 / circumference
                         * config.steps_per_revolution) as u32,
                 });
+            }
+            Cmd::PenUp => {
+                servo.set_angle(90);
+                Timer::after_millis(50).await;
+            }
+            Cmd::PenDown => {
+                servo.set_angle(180);
+                Timer::after_millis(50).await;
             }
             _ => {
                 println!("unexpected cmd in calibrated mode");

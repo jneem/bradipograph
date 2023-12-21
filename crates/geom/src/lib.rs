@@ -46,7 +46,7 @@ pub struct RotorAngles {
     pub right: Angle,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StepperPositions {
     pub left: u32,
     pub right: u32,

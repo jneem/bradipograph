@@ -1,5 +1,5 @@
 use esp32c3_hal::{
-    gpio::{GpioPin, Output, Pin, PushPull},
+    gpio::{GpioPin, Output, PushPull},
     ledc::{
         channel::{Channel, ChannelHW as _},
         LowSpeed,

@@ -8,13 +8,15 @@ use std::{
 use anyhow::anyhow;
 use bradipous_curves::Curve;
 use bradipous_geom::ConfigBuilder;
-use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
+use bradipous_planner::{stepper::Velocity, MotionCurve, PlannerConfig};
+use bradipous_protocol::{Calibration, CalibrationStatus, Cmd, StepperSegment};
 use btleplug::{
     api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
     platform::{Adapter, Manager, Peripheral},
 };
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar};
+use kurbo::Point;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
 
 use crate::connection::Bradipograph;
@@ -23,6 +25,9 @@ mod connection;
 mod svg;
 
 const TICK: Duration = Duration::from_millis(50);
+const MAX_STEPS_PER_SEC: u32 = 300;
+// what fraction of a second does it take to reach max velocity
+const MAX_VELOCITY_PER_SEC: u32 = 8;
 
 #[derive(Parser)]
 struct Args {
@@ -73,27 +78,23 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let mut calibration = brad.read_calibration().await?;
     bar.finish_with_message("received!");
 
-    while matches!(calibration, CalibrationStatus::Uncalibrated) {
+    while !matches!(calibration, CalibrationStatus::CalibratedAndPositioned(..)) {
         eprintln!("Uncalibrated");
         command_mode(&brad).await?;
         calibration = brad.read_calibration().await?;
     }
-    let calib = match &calibration {
-        CalibrationStatus::Uncalibrated => unreachable!(),
-        CalibrationStatus::Calibrated(c) => c,
-        CalibrationStatus::CalibratedAndPositioned(c, _) => c,
+    let CalibrationStatus::CalibratedAndPositioned(calib, pos) = calibration else {
+        panic!();
     };
-    eprintln!("Calibration {calibration:?}");
+    eprintln!("Calibration {calib:?}, pos {pos:?}");
     let config = ConfigBuilder::default()
         .with_max_hang(calib.max_hang as f64)
         .with_spool_radius(calib.spool_radius as f64)
         .with_claw_distance(calib.claw_distance as f64)
         .build();
 
-    eprintln!("Calibration {calibration:?}");
-
     if let Some(path) = &args.path {
-        send_file(&brad, &config, path).await?;
+        send_file(&brad, &config, Point::new(pos.x as f64, pos.y as f64), path).await?;
     } else {
         command_mode(&brad).await?;
     }
@@ -106,21 +107,78 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
 async fn send_file(
     brad: &Bradipograph,
     config: &bradipous_geom::Config,
+    initial_position: Point,
     path: &Path,
 ) -> Result<()> {
     let mut paths = svg::load_svg(path)?;
 
     svg::transform(&mut paths, config);
-    // TODO: support a bigger curve, and break it into pieces before sending.
-    let mut curve = Curve::<32>::default();
+
+    let max_accel_steps = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
+    let min_velocity = Velocity {
+        steps_per_s: (max_accel_steps as f64).sqrt() as u16,
+    };
+
+    let max_revs_per_sec = MAX_STEPS_PER_SEC as f64 / config.steps_per_revolution;
+    let planner_config = PlannerConfig {
+        max_energy: max_revs_per_sec * max_revs_per_sec,
+        max_acceleration: max_revs_per_sec * MAX_VELOCITY_PER_SEC as f64,
+        accuracy: 0.05,
+    };
+
+    let mut steps = config.point_to_steps(&initial_position);
     for p in &paths {
+        let mut curve = Curve::<8192>::default();
         if curve.extend(p.elements()).is_err() {
             eprintln!("This curve is too complicated! Truncating it.");
-            break;
+            continue;
+        }
+
+        let mut pen_is_up = true;
+        for subcurve in curve.subcurves() {
+            let mut last_velocity = min_velocity;
+            let Some(m) = MotionCurve::<16384>::plan(&curve, &planner_config, config) else {
+                println!("error planning the curve");
+                continue;
+            };
+            let move_first = subcurve.insts.first().map_or(false, |i| !i.is_draw());
+            for (i, (pt, energy)) in m.points.iter().zip(&m.energies).enumerate() {
+                if i == 0 && move_first {
+                    brad.send_cmd_and_wait(Cmd::PenUp).await?;
+                    pen_is_up = true;
+                } else if pen_is_up {
+                    brad.send_cmd_and_wait(Cmd::PenDown).await?;
+                    pen_is_up = false;
+                }
+
+                let end_velocity = Velocity {
+                    steps_per_s: energy.sqrt() as u16,
+                };
+                let target_steps = config.point_to_steps(pt);
+                if target_steps == steps {
+                    // Filter out tiny segments.
+                    continue;
+                }
+
+                let right_steps = target_steps.right as i32 - steps.right as i32;
+                let left_steps = target_steps.left as i32 - steps.left as i32;
+                let seg = StepperSegment {
+                    left_steps,
+                    right_steps,
+                    start_steps_per_sec: last_velocity.steps_per_s,
+                    end_steps_per_sec: end_velocity.steps_per_s,
+                };
+                if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16, max_accel_steps) {
+                    brad.send_cmd_and_wait(Cmd::Segment(accel)).await?;
+                    brad.send_cmd_and_wait(Cmd::Segment(decel)).await?;
+                } else {
+                    brad.send_cmd_and_wait(Cmd::Segment(seg)).await?;
+                }
+                last_velocity = end_velocity;
+                steps = target_steps;
+            }
         }
     }
-
-    brad.send_cmd(Cmd::Draw(curve)).await?;
 
     Ok(())
 }
