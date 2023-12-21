@@ -51,36 +51,36 @@ impl StepperSegment {
         max_steps_per_sec: u16,
         max_steps_per_sec_per_sec: u32,
     ) -> Option<(StepperSegment, StepperSegment)> {
-        let start_v = self.start_steps_per_sec as i32;
-        let end_v = self.end_steps_per_sec as i32;
-        let max_v = max_steps_per_sec as i32;
-        let max_steps_per_sec_per_sec = max_steps_per_sec_per_sec as i32;
+        let start_v = self.start_steps_per_sec as f64;
+        let end_v = self.end_steps_per_sec as f64;
+        let max_v = max_steps_per_sec as f64;
+        let max_steps_per_sec_per_sec = max_steps_per_sec_per_sec as f64;
 
         let square = |x| x * x;
         // How many steps would it take to get from the initial to the final velocity?
-        let steps = (square(start_v) - square(end_v)).abs() / (2 * max_steps_per_sec_per_sec);
+        let steps = (square(start_v) - square(end_v)).abs() / (2.0 * max_steps_per_sec_per_sec);
 
-        let max_steps = self.left_steps.abs().max(self.right_steps.abs());
-        if max_steps == 0 {
+        let max_steps = self.left_steps.abs().max(self.right_steps.abs()) as f64;
+        if max_steps == 0.0 {
             // Avoid dividing by zero.
             return None;
         }
-        if steps <= max_steps / 2 && (start_v <= max_v * 3 / 4 || end_v <= max_v * 3 / 4) {
+        if steps <= max_steps / 2.0 && end_v <= max_v * 0.75 {
             // 2 * max_steps * self.accel.steps_per_s_per_s is the total amount that the squared
             // velocity can change while traversing this segment. Some of that change must be used
             // up in getting from the initial velocity to the final velocity. And then the peak energy
             // as we traverse the segment is half of what's left (since we need to go up and then down).
-            let max_energy =
-                max_steps * max_steps_per_sec_per_sec - (square(start_v) - square(end_v)).abs() / 2;
-            let max_velocity = ((max_energy as f64).sqrt() as i32).min(max_v);
+            let max_energy = max_steps * max_steps_per_sec_per_sec
+                - (square(start_v) - square(end_v)).abs() / 2.0;
+            let max_velocity = max_energy.sqrt().min(max_v);
 
             // How may steps will it take to get from the max velocity back down to the final velocity?
             let decel_steps =
-                (square(max_velocity) - square(end_v)) / (2 * max_steps_per_sec_per_sec);
+                (square(max_velocity) - square(end_v)) / (2.0 * max_steps_per_sec_per_sec);
 
             let decel_seg = StepperSegment {
-                left_steps: self.left_steps * decel_steps / max_steps,
-                right_steps: self.right_steps * decel_steps / max_steps,
+                left_steps: (self.left_steps as f64 * decel_steps / max_steps).round() as i32,
+                right_steps: (self.right_steps as f64 * decel_steps / max_steps).round() as i32,
                 start_steps_per_sec: max_velocity as u16,
                 end_steps_per_sec: self.end_steps_per_sec,
             };
@@ -133,4 +133,42 @@ impl From<Config> for bradipous_geom::Config {
 pub enum CalibrationStatus {
     Uncalibrated,
     Calibrated(Config, StepperPositions),
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    impl Arbitrary for StepperSegment {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<StepperSegment>;
+
+        fn arbitrary_with(_: ()) -> Self::Strategy {
+            let n = 1 << 20;
+            (-n..n, -n..n, 1u16..1000, 1u16..1000)
+                .prop_map(
+                    |(left_steps, right_steps, start_steps_per_sec, end_steps_per_sec)| {
+                        StepperSegment {
+                            left_steps,
+                            right_steps,
+                            start_steps_per_sec,
+                            end_steps_per_sec,
+                        }
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn successful_split_is_nonempty(seg: StepperSegment, max_v in 100u16..1000, max_a in 100u32..1000) {
+            let max_v = seg.start_steps_per_sec.max(seg.end_steps_per_sec).max(max_v);
+            if let Some((a, d)) = seg.split(max_v, max_a) {
+                assert!(a.left_steps != 0 || a.right_steps != 0);
+                assert!(d.left_steps != 0 || d.right_steps != 0);
+            }
+        }
+    }
 }

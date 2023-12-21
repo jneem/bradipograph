@@ -56,9 +56,9 @@ static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::ne
 const FLASH_ADDR: u32 = 0x110000;
 
 // TODO: these should be part of the config
-const MAX_STEPS_PER_SEC: u32 = 300;
+const MAX_STEPS_PER_SEC: u32 = 500;
 // what fraction of a second does it take to reach max velocity
-const MAX_VELOCITY_PER_SEC: u32 = 8;
+const MAX_VELOCITY_PER_SEC: u32 = 1;
 const MAX_ACCEL: u32 = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
 
 static GLOBAL: GlobalState = GlobalState {

@@ -25,9 +25,9 @@ mod connection;
 mod svg;
 
 const TICK: Duration = Duration::from_millis(50);
-const MAX_STEPS_PER_SEC: u32 = 300;
+const MAX_STEPS_PER_SEC: u32 = 500;
 // what fraction of a second does it take to reach max velocity
-const MAX_VELOCITY_PER_SEC: u32 = 8;
+const MAX_VELOCITY_PER_SEC: u32 = 1;
 
 #[derive(Parser)]
 struct Args {
@@ -86,9 +86,9 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let CalibrationStatus::Calibrated(calib, pos) = calibration else {
         unreachable!();
     };
-    eprintln!("Calibration {calib:?}, pos {pos:?}");
     let config = Config::from(calib);
     let init_pos = config.steps_to_point(&pos);
+    eprintln!("Calibration {config:?}, steps {pos:?}, pos {init_pos:?}");
 
     if let Some(path) = &args.path {
         // When sending a file, quit on error (otherwise we keep trying to send it
@@ -252,6 +252,7 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
                 start_steps_per_sec: 34,
                 end_steps_per_sec: 34,
             };
+            eprintln!("from {init_pos:?} to {pos:?}, seg {seg:?}");
             // TODO: these max-velocity and max-acceleration settings need to match the ones used
             // on the device, or else it doesn't really make sense...
             if let Some((accel, decel)) = seg.split(500, 500) {
