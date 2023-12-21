@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::anyhow;
 use bradipous_curves::Curve;
-use bradipous_geom::ConfigBuilder;
+use bradipous_geom::Config;
 use bradipous_planner::{stepper::Velocity, MotionCurve, PlannerConfig};
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd, StepperSegment};
 use btleplug::{
@@ -78,32 +78,33 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let mut calibration = brad.read_calibration().await?;
     bar.finish_with_message("received!");
 
-    while !matches!(calibration, CalibrationStatus::CalibratedAndPositioned(..)) {
+    while matches!(calibration, CalibrationStatus::Uncalibrated) {
         eprintln!("Uncalibrated");
         command_mode(&brad).await?;
         calibration = brad.read_calibration().await?;
     }
-    let CalibrationStatus::CalibratedAndPositioned(calib, pos) = calibration else {
-        panic!();
+    let CalibrationStatus::Calibrated(calib, pos) = calibration else {
+        unreachable!();
     };
     eprintln!("Calibration {calib:?}, pos {pos:?}");
-    let config = ConfigBuilder::default()
-        .with_max_hang(calib.max_hang as f64)
-        .with_spool_radius(calib.spool_radius as f64)
-        .with_claw_distance(calib.claw_distance as f64)
-        .build();
+    let config = Config::from(calib);
+    let init_pos = config.steps_to_point(&pos);
 
     if let Some(path) = &args.path {
-        send_file(&brad, &config, Point::new(pos.x as f64, pos.y as f64), path).await?;
+        // When sending a file, quit on error (otherwise we keep trying to send it
+        // on reconnection).
+        match send_file(&brad, &config, init_pos, path).await {
+            Err(Error::Err(e)) => {
+                eprintln!("Sending the file failed with error {e}");
+                Err(Error::Exit)
+            }
+            x => x,
+        }
     } else {
-        command_mode(&brad).await?;
+        command_mode(&brad).await
     }
-    Ok(())
 }
 
-// This is a hacked-up thing that flattens the curves in xy coordinates and sends them
-// as a sequence of move-tos. We should instead send the curves using the representation
-// in bradipous-curves and do the flattening on the bradipous.
 async fn send_file(
     brad: &Bradipograph,
     config: &bradipous_geom::Config,
@@ -116,32 +117,33 @@ async fn send_file(
 
     let max_accel_steps = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
     let min_velocity = Velocity {
-        steps_per_s: (max_accel_steps as f64).sqrt() as u16,
+        steps_per_s: (max_accel_steps as f64 / 2.0).sqrt() as u16,
     };
 
     let max_revs_per_sec = MAX_STEPS_PER_SEC as f64 / config.steps_per_revolution;
     let planner_config = PlannerConfig {
-        max_energy: max_revs_per_sec * max_revs_per_sec,
+        max_energy: dbg!(max_revs_per_sec * max_revs_per_sec),
         max_acceleration: max_revs_per_sec * MAX_VELOCITY_PER_SEC as f64,
-        accuracy: 0.05,
+        accuracy: 0.08,
     };
 
     let mut steps = config.point_to_steps(&initial_position);
     for p in &paths {
         let mut curve = Curve::<8192>::default();
-        if curve.extend(p.elements()).is_err() {
+        if curve.extend(dbg!(p.elements())).is_err() {
             eprintln!("This curve is too complicated! Truncating it.");
             continue;
         }
 
         let mut pen_is_up = true;
-        for subcurve in curve.subcurves() {
+        for (subcurve_idx, subcurve) in curve.subcurves().enumerate() {
             let mut last_velocity = min_velocity;
             let Some(m) = MotionCurve::<16384>::plan(&curve, &planner_config, config) else {
                 println!("error planning the curve");
                 continue;
             };
-            let move_first = subcurve.insts.first().map_or(false, |i| !i.is_draw());
+            let move_first =
+                subcurve_idx == 0 || subcurve.insts.first().map_or(false, |i| !i.is_draw());
             for (i, (pt, energy)) in m.points.iter().zip(&m.energies).enumerate() {
                 if i == 0 && move_first {
                     brad.send_cmd_and_wait(Cmd::PenUp).await?;
@@ -152,7 +154,8 @@ async fn send_file(
                 }
 
                 let end_velocity = Velocity {
-                    steps_per_s: energy.sqrt() as u16,
+                    steps_per_s: ((energy.sqrt() * config.steps_per_revolution) as u16)
+                        .max(min_velocity.steps_per_s),
                 };
                 let target_steps = config.point_to_steps(pt);
                 if target_steps == steps {
@@ -231,8 +234,30 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
             let Some(y) = read_number(&mut reed, "y")? else {
                 continue;
             };
-
-            brad.send_cmd(Cmd::MoveTo(x, y)).await?;
+            let calib = brad.read_calibration().await?;
+            let CalibrationStatus::Calibrated(calib, steps) = calib else {
+                eprintln!("Cannot move, you must calibrate first");
+                continue;
+            };
+            let config = Config::from(calib);
+            let init_pos = config.steps_to_point(&steps);
+            let init_steps = config.point_to_steps(&init_pos);
+            let pos = Point::new(x.into(), y.into());
+            let steps = config.point_to_steps(&pos);
+            let right_steps = steps.right as i32 - init_steps.right as i32;
+            let left_steps = steps.left as i32 - init_steps.left as i32;
+            let seg = StepperSegment {
+                left_steps,
+                right_steps,
+                start_steps_per_sec: 34,
+                end_steps_per_sec: 34,
+            };
+            // TODO: these max-velocity and max-acceleration settings need to match the ones used
+            // on the device, or else it doesn't really make sense...
+            if let Some((accel, decel)) = seg.split(500, 500) {
+                brad.send_cmd(Cmd::Segment(accel)).await?;
+                brad.send_cmd(Cmd::Segment(decel)).await?;
+            }
         } else if s == "query" {
             let calib = brad.read_calibration().await?;
             eprintln!("calibration: {calib:?}");

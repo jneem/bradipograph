@@ -4,7 +4,7 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{ArmLengths, Config, ConfigBuilder, StepperPositions};
+use bradipous_geom::{Config, ConfigBuilder, StepperPositions};
 use bradipous_planner::stepper::{Accel, Velocity};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
@@ -27,7 +27,6 @@ use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::EspWifiInitFor;
 use espilepsy::Color;
-use kurbo::Point;
 use servo::Servo;
 use stepper::{Direction, Stepper};
 
@@ -69,7 +68,7 @@ static GLOBAL: GlobalState = GlobalState {
 
 struct GlobalState {
     config: Mutex<Cell<Option<Config>>>,
-    position: Mutex<Cell<Option<Point>>>,
+    position: Mutex<Cell<Option<StepperPositions>>>,
 }
 
 impl GlobalState {
@@ -77,7 +76,7 @@ impl GlobalState {
         self.config.lock(|c| c.get())
     }
 
-    pub fn position(&self) -> Option<Point> {
+    pub fn position(&self) -> Option<StepperPositions> {
         self.position.lock(|p| p.get())
     }
 
@@ -86,7 +85,7 @@ impl GlobalState {
         self.write_to_flash();
     }
 
-    pub fn set_position(&self, pos: Point) {
+    pub fn set_position(&self, pos: StepperPositions) {
         self.position.lock(|p| p.set(Some(pos)));
         self.write_to_flash();
     }
@@ -94,21 +93,21 @@ impl GlobalState {
     pub fn write_to_flash(&self) {
         if let (Some(config), Some(position)) = (self.config(), self.position()) {
             let mut buf = [0u8; 256];
-            buf[0..4].copy_from_slice(b"brad");
+            buf[0..5].copy_from_slice(b"bradi");
             let mut flash = FlashStorage::new();
             let data = FlashData { config, position };
-            let _ = postcard::to_slice(&data, &mut buf[4..]).unwrap();
+            let _ = postcard::to_slice(&data, &mut buf[5..]).unwrap();
             flash.write(FLASH_ADDR, &buf).unwrap();
         }
     }
 
-    pub fn read_from_flash(&self) -> Option<(Config, Point)> {
+    pub fn read_from_flash(&self) -> Option<(Config, StepperPositions)> {
         let mut buf = [0u8; 256];
         let mut flash = FlashStorage::new();
         flash.read(FLASH_ADDR, &mut buf).unwrap();
 
-        if &buf[0..4] == b"brad" {
-            let data = postcard::from_bytes::<FlashData>(&buf[4..]).ok()?;
+        if &buf[0..5] == b"bradi" {
+            let data = postcard::from_bytes::<FlashData>(&buf[5..]).ok()?;
             self.set_config(data.config);
             self.set_position(data.position);
             Some((data.config, data.position))
@@ -127,70 +126,14 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> Config {
         .with_max_hang(30.0)
         .build();
 
-    let pos = config.arm_lengths_to_point(&ArmLengths {
-        left: calib.left_arm_cm as f64,
-        right: calib.right_arm_cm as f64,
-    });
+    let pos = StepperPositions {
+        left: (calib.left_arm_cm as f64 * config.steps_per_revolution) as u32,
+        right: (calib.right_arm_cm as f64 * config.steps_per_revolution) as u32,
+    };
 
     global.set_config(config);
     global.set_position(pos);
     config
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn move_to(
-    config: &Config,
-    from: StepperPositions,
-    x: f32,
-    y: f32,
-    start_velocity: Velocity,
-    end_velocity: Velocity,
-    left: &mut Stepper,
-    right: &mut Stepper,
-) -> (StepperPositions, Point) {
-    let p = Point::new(x as f64, y as f64);
-    let target_steps = config.point_to_steps(&p);
-    println!("move to (x, y), steps {from:?} -> {target_steps:?}");
-    let right_count = target_steps.right.abs_diff(from.right);
-    let left_count = target_steps.left.abs_diff(from.left);
-    let max_velocity = Velocity {
-        steps_per_s: MAX_STEPS_PER_SEC as u16,
-    };
-    let seg = bradipous_planner::stepper::Segment {
-        steps: bradipous_planner::stepper::Position {
-            left: left_count as u16,
-            right: right_count as u16,
-        },
-        start_velocity,
-        end_velocity,
-        accel: Accel {
-            steps_per_s_per_s: MAX_ACCEL,
-        },
-    };
-    let (accel, decel) = seg.split(max_velocity).unwrap();
-
-    let right_dir = if target_steps.right > from.right {
-        Direction::Clockwise
-    } else {
-        Direction::CounterClockwise
-    };
-    let left_dir = if target_steps.left > from.left {
-        Direction::CounterClockwise
-    } else {
-        Direction::Clockwise
-    };
-
-    for tick in accel.iter_steps().chain(decel.iter_steps()) {
-        if tick.left {
-            left.step(left_dir);
-        }
-        if tick.right {
-            right.step(right_dir);
-        }
-        Timer::after_micros(tick.delay_us.into()).await;
-    }
-
-    (target_steps, p)
 }
 
 async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) {
@@ -219,13 +162,13 @@ async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) 
     };
 
     for tick in seg2.iter_steps() {
+        Timer::after_micros(tick.delay_us.into()).await;
         if tick.left {
             left.step(left_dir);
         }
         if tick.right {
             right.step(right_dir);
         }
-        Timer::after_micros(tick.delay_us.into()).await;
     }
 }
 
@@ -235,19 +178,12 @@ async fn calibrated_control(
     right: &mut Stepper,
     servo: &mut Servo,
 ) {
-    let min_velocity = Velocity {
-        steps_per_s: libm::sqrtf(2.0 * MAX_ACCEL as f32) as u16,
-    };
-    let maybe_point = GLOBAL.position();
-    let mut maybe_config = GLOBAL.config();
-    let mut maybe_steps = maybe_point
-        .zip(maybe_config)
-        .map(|(p, c)| c.point_to_steps(&p));
+    let mut maybe_steps = GLOBAL.position();
     loop {
         match cmds.receive().await {
             Cmd::Segment(seg) => {
-                let Some((config, mut steps)) = maybe_config.zip(maybe_steps) else {
-                    println!("cannot move without a calibration and a position");
+                let Some(mut steps) = maybe_steps else {
+                    println!("cannot move without a position");
                     continue;
                 };
 
@@ -257,47 +193,10 @@ async fn calibrated_control(
 
                 move_seg(seg, left, right).await;
 
-                // TODO: we don't really need to track the current point...
-                let circumference = config.spool_radius * core::f64::consts::PI * 2.0;
-                let arm_lengths = ArmLengths {
-                    left: steps.left as f64 / config.steps_per_revolution * circumference,
-                    right: steps.right as f64 / config.steps_per_revolution * circumference,
-                };
-                let p = config.arm_lengths_to_point(&arm_lengths);
-                GLOBAL.set_position(p);
-            }
-            Cmd::MoveTo(x, y) => {
-                let Some((config, steps)) = maybe_config.zip(maybe_steps) else {
-                    println!("cannot move without a calibration and a position");
-                    continue;
-                };
-
-                let (steps, p) = move_to(
-                    &config,
-                    steps,
-                    x,
-                    y,
-                    min_velocity,
-                    min_velocity,
-                    left,
-                    right,
-                )
-                .await;
-                maybe_steps = Some(steps);
-                GLOBAL.set_position(p);
-            }
-            Cmd::SetPos(x, y) => {
-                let Some(config) = maybe_config else {
-                    println!("cannot set position before calibration");
-                    continue;
-                };
-                let p = Point::new(x as f64, y as f64);
-                GLOBAL.set_position(p);
-                maybe_steps = Some(config.point_to_steps(&p));
+                GLOBAL.set_position(steps);
             }
             Cmd::Calibrate(calibration) => {
                 let config = apply_calibration(&GLOBAL, calibration);
-                maybe_config = Some(config);
 
                 let circumference = config.spool_radius * core::f64::consts::PI * 2.0;
 
@@ -315,10 +214,6 @@ async fn calibrated_control(
             Cmd::PenDown => {
                 servo.set_angle(180);
                 Timer::after_millis(50).await;
-            }
-            _ => {
-                println!("unexpected cmd in calibrated mode");
-                continue;
             }
         }
     }
@@ -424,5 +319,5 @@ async fn main(spawner: Spawner) {
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 struct FlashData {
     config: Config,
-    position: Point,
+    position: StepperPositions,
 }

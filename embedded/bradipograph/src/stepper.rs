@@ -11,15 +11,6 @@ pub enum Direction {
     CounterClockwise,
 }
 
-impl Direction {
-    pub fn to_i32(self) -> i32 {
-        match self {
-            Direction::Clockwise => 1,
-            Direction::CounterClockwise => -1,
-        }
-    }
-}
-
 pub type AnyOutput = AnyPin<Output<PushPull>>;
 
 pub struct Stepper {

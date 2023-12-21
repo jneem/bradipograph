@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use bradipous_geom::StepperPositions;
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,12 +23,7 @@ pub struct Calibration {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Cmd {
-    Manual(ManualControl),
     Calibrate(Calibration),
-    // Tell the bradipograph that it's currently in this position.
-    SetPos(f32, f32),
-    // Temporary, to test calibration
-    MoveTo(f32, f32),
     Segment(StepperSegment),
     PenUp,
     PenDown,
@@ -85,7 +81,7 @@ impl StepperSegment {
             let decel_seg = StepperSegment {
                 left_steps: self.left_steps * decel_steps / max_steps,
                 right_steps: self.right_steps * decel_steps / max_steps,
-                start_steps_per_sec: (max_velocity as f64).sqrt() as u16,
+                start_steps_per_sec: max_velocity as u16,
                 end_steps_per_sec: self.end_steps_per_sec,
             };
             let accel_seg = StepperSegment {
@@ -101,6 +97,7 @@ impl StepperSegment {
     }
 }
 
+// TODO: clarify the relationship between this config and bradipous_geom::Config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub claw_distance: f32,
@@ -122,17 +119,18 @@ impl From<bradipous_geom::Config> for Config {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Position {
-    pub x: f32,
-    pub y: f32,
-    pub left_arm_length: f32,
-    pub right_arm_length: f32,
+impl From<Config> for bradipous_geom::Config {
+    fn from(c: Config) -> Self {
+        bradipous_geom::ConfigBuilder::default()
+            .with_max_hang(c.max_hang as f64)
+            .with_spool_radius(c.spool_radius as f64)
+            .with_claw_distance(c.claw_distance as f64)
+            .build()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CalibrationStatus {
     Uncalibrated,
-    Calibrated(Config),
-    CalibratedAndPositioned(Config, Position),
+    Calibrated(Config, StepperPositions),
 }
