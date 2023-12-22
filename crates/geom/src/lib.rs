@@ -156,15 +156,6 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn draw_box(&self) -> Rect {
-        Rect {
-            x0: -self.claw_distance / 2.0,
-            x1: self.claw_distance / 2.0,
-            y0: 0.0,
-            y1: self.max_hang,
-        }
-    }
-
     pub fn arm_lengths(&self, p: &Point) -> ArmLengths {
         let x = p.x;
         let y = p.y + self.hang_offset;
@@ -226,7 +217,7 @@ impl Config {
         self.stepper_steps(&angles)
     }
 
-    pub fn bbox(&self) -> Rect {
+    pub fn draw_box(&self) -> Rect {
         Rect::new(
             -self.claw_distance / 2.0 + self.side_inset,
             0.0,

@@ -42,7 +42,7 @@ pub fn main() -> anyhow::Result<()> {
         .with_claw_distance(100.0)
         .with_max_hang(50.0)
         .build();
-    let target_bbox = Rect::new(-50.0, 0.0, 50.0, 50.0);
+    let target_bbox = geom_config.draw_box();
     let scale = (target_bbox.height() / bbox.height()).min(target_bbox.width() / bbox.width());
 
     let transform = Affine::translate(-bbox.center().to_vec2())

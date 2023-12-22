@@ -91,6 +91,21 @@ impl<const CAP: usize> MotionCurve<CAP> {
         Some(ret)
     }
 
+    pub fn plan_one(
+        path: CurveRef<'_>,
+        config: &PlannerConfig,
+        transform: &impl Transform,
+    ) -> Option<Self> {
+        let mut ret = MotionCurve {
+            points: Vec::new(),
+            energies: Vec::new(),
+        };
+
+        ret.append_smooth_path(path, config, transform)?;
+
+        Some(ret)
+    }
+
     fn append_smooth_path(
         &mut self,
         path: CurveRef<'_>,

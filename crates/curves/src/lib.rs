@@ -104,7 +104,7 @@ impl<const CAP: usize> Curve<CAP> {
 
         for el in path {
             let el = match *el {
-                PathEl::ClosePath => PathEl::MoveTo(*start_point),
+                PathEl::ClosePath => PathEl::LineTo(*start_point),
                 x => x,
             };
             self.push_el(&el)?;

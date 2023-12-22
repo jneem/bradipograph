@@ -6,9 +6,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use bradipous_curves::Curve;
 use bradipous_geom::Config;
-use bradipous_planner::{MotionCurve, PlannerConfig};
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd, StepperSegment};
 use btleplug::{
     api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
@@ -16,8 +14,9 @@ use btleplug::{
 };
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar};
-use kurbo::Point;
+use kurbo::{BezPath, Point, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
+use svg::plan;
 
 use crate::connection::Bradipograph;
 
@@ -111,73 +110,28 @@ async fn send_file(
     initial_position: Point,
     path: &Path,
 ) -> Result<()> {
-    let mut paths = svg::load_svg(path)?;
+    let mut p = svg::load_svg(path)?;
 
-    svg::transform(&mut paths, config);
+    svg::transform(&mut p, config);
 
-    let max_accel_steps = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
-    let min_steps_per_s = (max_accel_steps as f64 * 2.0).sqrt() as u16;
+    let cmds = plan(&p, &initial_position, config)?;
+    for cmd in cmds {
+        brad.send_cmd_and_wait(cmd).await?;
+    }
 
-    let max_revs_per_sec = MAX_STEPS_PER_SEC as f64 / config.steps_per_revolution;
-    let planner_config = PlannerConfig {
-        max_energy: dbg!(max_revs_per_sec * max_revs_per_sec),
-        max_acceleration: max_revs_per_sec * MAX_VELOCITY_PER_SEC as f64,
-        accuracy: 0.08,
-    };
+    Ok(())
+}
 
-    let mut steps = config.point_to_steps(&initial_position);
-    for p in &paths {
-        let mut curve = Curve::<8192>::default();
-        if curve.extend(dbg!(p.elements())).is_err() {
-            eprintln!("This curve is too complicated! Truncating it.");
-            continue;
-        }
-
-        let mut pen_is_up = true;
-        for (subcurve_idx, subcurve) in curve.subcurves().enumerate() {
-            let mut last_steps_per_s = min_steps_per_s;
-            let Some(m) = MotionCurve::<16384>::plan(&curve, &planner_config, config) else {
-                println!("error planning the curve");
-                continue;
-            };
-            let move_first =
-                subcurve_idx == 0 || subcurve.insts.first().map_or(false, |i| !i.is_draw());
-            for (i, (pt, energy)) in m.points.iter().zip(&m.energies).enumerate() {
-                if i == 0 && move_first {
-                    brad.send_cmd_and_wait(Cmd::PenUp).await?;
-                    pen_is_up = true;
-                } else if pen_is_up {
-                    brad.send_cmd_and_wait(Cmd::PenDown).await?;
-                    pen_is_up = false;
-                }
-
-                let end_steps_per_s =
-                    ((energy.sqrt() * config.steps_per_revolution) as u16).max(min_steps_per_s);
-                let target_steps = config.point_to_steps(pt);
-                if target_steps == steps {
-                    // Filter out tiny segments.
-                    continue;
-                }
-
-                let right_steps = target_steps.right as i32 - steps.right as i32;
-                let left_steps = target_steps.left as i32 - steps.left as i32;
-                let seg = StepperSegment {
-                    left_steps,
-                    right_steps,
-                    start_steps_per_sec: last_steps_per_s,
-                    end_steps_per_sec: end_steps_per_s,
-                    steps_per_sec_per_sec: max_accel_steps,
-                };
-                if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
-                    brad.send_cmd_and_wait(Cmd::Segment(accel)).await?;
-                    brad.send_cmd_and_wait(Cmd::Segment(decel)).await?;
-                } else {
-                    brad.send_cmd_and_wait(Cmd::Segment(seg)).await?;
-                }
-                last_steps_per_s = end_steps_per_s;
-                steps = target_steps;
-            }
-        }
+async fn draw_box(
+    brad: &Bradipograph,
+    config: &bradipous_geom::Config,
+    initial_position: Point,
+) -> Result<()> {
+    let bbox = config.draw_box();
+    let path: BezPath = bbox.path_elements(0.01).collect();
+    let cmds = plan(&path, &initial_position, config)?;
+    for cmd in cmds {
+        brad.send_cmd_and_wait(cmd).await?;
     }
 
     Ok(())
@@ -283,6 +237,16 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
                 right_arm_cm: right,
             }))
             .await?;
+        } else if s == "square" {
+            let calib = brad.read_calibration().await?;
+
+            let CalibrationStatus::Calibrated(calib, steps) = calib else {
+                eprintln!("Cannot draw square, you must calibrate first");
+                continue;
+            };
+            let config = Config::from(calib);
+            let init_pos = config.steps_to_point(&steps);
+            draw_box(brad, &config, init_pos).await?;
         } else {
             eprintln!("unknown command");
         }
