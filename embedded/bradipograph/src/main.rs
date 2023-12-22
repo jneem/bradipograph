@@ -5,7 +5,6 @@
 use core::cell::Cell;
 
 use bradipous_geom::{Config, ConfigBuilder, StepperPositions};
-use bradipous_planner::stepper::{Accel, Velocity};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -54,12 +53,6 @@ static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::new();
 
 const FLASH_ADDR: u32 = 0x110000;
-
-// TODO: these should be part of the config
-const MAX_STEPS_PER_SEC: u32 = 500;
-// what fraction of a second does it take to reach max velocity
-const MAX_VELOCITY_PER_SEC: u32 = 1;
-const MAX_ACCEL: u32 = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
 
 static GLOBAL: GlobalState = GlobalState {
     config: Mutex::new(Cell::new(None)),
@@ -137,19 +130,6 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> Config {
 }
 
 async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) {
-    // TODO: unify protocol::StepperSegment and planner::stepper::Segment
-    let seg2 = bradipous_planner::stepper::Segment {
-        steps: bradipous_planner::stepper::Position {
-            left: seg.left_steps.unsigned_abs() as u16,
-            right: seg.right_steps.unsigned_abs() as u16,
-        },
-        start_velocity: Velocity::from_steps_per_second(seg.start_steps_per_sec),
-        end_velocity: Velocity::from_steps_per_second(seg.end_steps_per_sec),
-        accel: Accel {
-            steps_per_s_per_s: MAX_ACCEL,
-        },
-    };
-
     let right_dir = if seg.right_steps > 0 {
         Direction::Clockwise
     } else {
@@ -161,7 +141,7 @@ async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) 
         Direction::Clockwise
     };
 
-    for tick in seg2.iter_steps() {
+    for tick in seg.iter_steps() {
         Timer::after_micros(tick.delay_us.into()).await;
         if tick.left {
             left.step(left_dir);

@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-std = ["bradipous-planner/std"]
+std = ["bradipous-planner"]
 default = ["std"]
 
 [dependencies]
-bradipous-planner = { version = "0.1.0", path = "../planner", default-features = false }
+bradipous-planner = { version = "0.1.0", path = "../planner", optional = true }
 kurbo = { workspace = true, default-features = false, features = ["libm"] }
 libm = "0.2.8"
 serde = { version = "1.0.193", default-features = false, features = ["derive"] }

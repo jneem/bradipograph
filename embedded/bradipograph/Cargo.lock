@@ -138,7 +138,6 @@ version = "0.1.0"
 dependencies = [
  "bleps",
  "bradipous-geom",
- "bradipous-planner",
  "bradipous-protocol",
  "embassy-executor",
  "embassy-sync",
@@ -178,19 +177,6 @@ dependencies = [
 name = "bradipous-geom"
 version = "0.1.0"
 dependencies = [
- "bradipous-planner",
- "kurbo",
- "libm",
- "serde",
-]
-
-[[package]]
-name = "bradipous-planner"
-version = "0.1.0"
-dependencies = [
- "bradipous-curves",
- "fixed",
- "heapless 0.8.0",
  "kurbo",
  "libm",
  "serde",
@@ -965,7 +951,6 @@ source = "git+https://github.com/jneem/kurbo?branch=no-alloc#7f3213133b2d079e0d5
 dependencies = [
  "arrayvec",
  "libm",
- "serde",
 ]
 
 [[package]]

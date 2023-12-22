@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 bleps = { git = "https://github.com/bjoernQ/bleps", version = "0.1.0", features = ["async", "mtu256", "macros"] }
 bradipous-geom = { path = "../../crates/geom", default-features = false }
-bradipous-planner = { version = "0.1.0", path = "../../crates/planner", default-features = false }
 bradipous-protocol = { path = "../../crates/protocol", default-features = false }
 embassy-executor = { version = "0.4", features = ["nightly"] }
 embassy-sync = "0.5.0"

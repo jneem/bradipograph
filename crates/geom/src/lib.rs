@@ -2,7 +2,6 @@
 
 use core::f64::consts::PI;
 
-use bradipous_planner::Transform;
 use kurbo::{Point, Rect, Vec2};
 use libm::{sqrt, tan};
 
@@ -221,7 +220,8 @@ impl Config {
     }
 }
 
-impl Transform for Config {
+#[cfg(feature = "std")]
+impl bradipous_planner::Transform for Config {
     fn f(&self, input: Point) -> Point {
         self.rotor_angles(&self.arm_lengths(&input)).to_point()
     }
@@ -272,6 +272,7 @@ impl Transform for Config {
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    use bradipous_planner::Transform;
     use proptest::prelude::*;
 
     impl Arbitrary for Config {
