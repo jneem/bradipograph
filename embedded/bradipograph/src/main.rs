@@ -4,7 +4,7 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{Config, ConfigBuilder, StepperPositions};
+use bradipous_geom::{ArmLengths, Config, ConfigBuilder, StepperPositions};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -110,7 +110,7 @@ impl GlobalState {
     }
 }
 
-fn apply_calibration(global: &GlobalState, calib: Calibration) -> Config {
+fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, StepperPositions) {
     let radius = 1.4;
 
     let config = ConfigBuilder::default()
@@ -119,14 +119,16 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> Config {
         .with_max_hang(30.0)
         .build();
 
-    let pos = StepperPositions {
-        left: (calib.left_arm_cm as f64 * config.steps_per_revolution) as u32,
-        right: (calib.right_arm_cm as f64 * config.steps_per_revolution) as u32,
+    let arm_lengths = ArmLengths {
+        left: calib.left_arm_cm as f64,
+        right: calib.right_arm_cm as f64,
     };
+    let angles = config.rotor_angles(&arm_lengths);
+    let pos = config.stepper_steps(&angles);
 
     global.set_config(config);
     global.set_position(pos);
-    config
+    (config, pos)
 }
 
 async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) {
@@ -176,16 +178,9 @@ async fn calibrated_control(
                 GLOBAL.set_position(steps);
             }
             Cmd::Calibrate(calibration) => {
-                let config = apply_calibration(&GLOBAL, calibration);
+                let (_, pos) = apply_calibration(&GLOBAL, calibration);
 
-                let circumference = config.spool_radius * core::f64::consts::PI * 2.0;
-
-                maybe_steps = Some(StepperPositions {
-                    left: (calibration.left_arm_cm as f64 / circumference
-                        * config.steps_per_revolution) as u32,
-                    right: (calibration.right_arm_cm as f64 / circumference
-                        * config.steps_per_revolution) as u32,
-                });
+                maybe_steps = Some(pos);
             }
             Cmd::PenUp => {
                 servo.set_angle(90);
