@@ -8,7 +8,7 @@ use std::{
 use anyhow::anyhow;
 use bradipous_curves::Curve;
 use bradipous_geom::Config;
-use bradipous_planner::{stepper::Velocity, MotionCurve, PlannerConfig};
+use bradipous_planner::{MotionCurve, PlannerConfig};
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd, StepperSegment};
 use btleplug::{
     api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
@@ -116,9 +116,7 @@ async fn send_file(
     svg::transform(&mut paths, config);
 
     let max_accel_steps = MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC;
-    let min_velocity = Velocity {
-        steps_per_s: (max_accel_steps as f64 / 2.0).sqrt() as u16,
-    };
+    let min_steps_per_s = (max_accel_steps as f64 * 2.0).sqrt() as u16;
 
     let max_revs_per_sec = MAX_STEPS_PER_SEC as f64 / config.steps_per_revolution;
     let planner_config = PlannerConfig {
@@ -137,7 +135,7 @@ async fn send_file(
 
         let mut pen_is_up = true;
         for (subcurve_idx, subcurve) in curve.subcurves().enumerate() {
-            let mut last_velocity = min_velocity;
+            let mut last_steps_per_s = min_steps_per_s;
             let Some(m) = MotionCurve::<16384>::plan(&curve, &planner_config, config) else {
                 println!("error planning the curve");
                 continue;
@@ -153,10 +151,8 @@ async fn send_file(
                     pen_is_up = false;
                 }
 
-                let end_velocity = Velocity {
-                    steps_per_s: ((energy.sqrt() * config.steps_per_revolution) as u16)
-                        .max(min_velocity.steps_per_s),
-                };
+                let end_steps_per_s =
+                    ((energy.sqrt() * config.steps_per_revolution) as u16).max(min_steps_per_s);
                 let target_steps = config.point_to_steps(pt);
                 if target_steps == steps {
                     // Filter out tiny segments.
@@ -168,8 +164,8 @@ async fn send_file(
                 let seg = StepperSegment {
                     left_steps,
                     right_steps,
-                    start_steps_per_sec: last_velocity.steps_per_s,
-                    end_steps_per_sec: end_velocity.steps_per_s,
+                    start_steps_per_sec: last_steps_per_s,
+                    end_steps_per_sec: end_steps_per_s,
                     steps_per_sec_per_sec: max_accel_steps,
                 };
                 if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
@@ -178,7 +174,7 @@ async fn send_file(
                 } else {
                     brad.send_cmd_and_wait(Cmd::Segment(seg)).await?;
                 }
-                last_velocity = end_velocity;
+                last_steps_per_s = end_steps_per_s;
                 steps = target_steps;
             }
         }

@@ -10,7 +10,54 @@ use kurbo::{
 use libm::{fabs, sqrt};
 
 mod arclen;
-pub mod stepper;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Velocity {
+    // This is allowed to go up to 2^14 (about 16k)
+    pub steps_per_s: u16,
+}
+
+impl Velocity {
+    pub fn from_steps_per_second(steps_per_s: u16) -> Self {
+        Self { steps_per_s }
+    }
+}
+
+#[cfg(test)]
+impl proptest::arbitrary::Arbitrary for Velocity {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Velocity>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        (0u16..(1 << 14))
+            .prop_map(|v| Velocity { steps_per_s: v })
+            .boxed()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Accel {
+    // This can go up to 2^18.
+    pub steps_per_s_per_s: u32,
+}
+
+#[cfg(test)]
+impl proptest::arbitrary::Arbitrary for Accel {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Accel>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        (0u32..(1 << 18))
+            .prop_map(|v| Accel {
+                steps_per_s_per_s: v,
+            })
+            .boxed()
+    }
+}
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct MotionCurve<const CAP: usize> {
