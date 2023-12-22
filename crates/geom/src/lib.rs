@@ -174,11 +174,20 @@ impl Config {
         }
     }
 
+    pub fn spool_circumference(&self) -> f64 {
+        self.spool_radius * 2.0 * core::f64::consts::PI
+    }
+
     pub fn steps_to_point(&self, steps: &StepperPositions) -> Point {
-        let arm_lengths = ArmLengths {
-            left: f64::from(steps.left) * (2.0 * PI) / self.steps_per_revolution,
-            right: f64::from(steps.right) * (2.0 * PI) / self.steps_per_revolution,
+        let angles = RotorAngles {
+            left: Angle::from_radians(
+                f64::from(steps.left) * (2.0 * PI) / self.steps_per_revolution,
+            ),
+            right: Angle::from_radians(
+                f64::from(steps.right) * (2.0 * PI) / self.steps_per_revolution,
+            ),
         };
+        let arm_lengths = self.rotor_angles_to_arm_lengths(&angles);
         self.arm_lengths_to_point(&arm_lengths)
     }
 
@@ -192,6 +201,13 @@ impl Config {
         RotorAngles {
             left: Angle::from_radians(lengths.left / self.spool_radius),
             right: Angle::from_radians(lengths.right / self.spool_radius),
+        }
+    }
+
+    pub fn rotor_angles_to_arm_lengths(&self, angles: &RotorAngles) -> ArmLengths {
+        ArmLengths {
+            left: angles.left.radians() * self.spool_radius,
+            right: angles.right.radians() * self.spool_radius,
         }
     }
 
@@ -331,9 +347,22 @@ mod tests {
             let p = Point {x,y};
             let arms = cfg.arm_lengths(&p);
             let q = cfg.arm_lengths_to_point(&arms);
-            dbg!(p, q, arms);
             assert!((p.x - q.x).abs() < 1e-3);
             assert!((p.y - q.y).abs() < 1e-3);
+        }
+
+        // Check that point_to_steps and steps_to_point are inverses, more or less. They won't be exact
+        // inverses because steps are integer-valued, but after a round-trip to ensure that the point
+        // is an integer number of steps then they should be inverses.
+        #[test]
+        fn test_point_step_inverse(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64) {
+            let p = Point {x,y};
+            let steps = cfg.point_to_steps(&p);
+            let p = cfg.steps_to_point(&steps);
+            let steps = cfg.point_to_steps(&p);
+            let q = cfg.steps_to_point(&steps);
+            assert!((p.x - q.x).abs() < 1e-2);
+            assert!((p.y - q.y).abs() < 1e-2);
         }
     }
 }
