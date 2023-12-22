@@ -170,8 +170,9 @@ async fn send_file(
                     right_steps,
                     start_steps_per_sec: last_velocity.steps_per_s,
                     end_steps_per_sec: end_velocity.steps_per_s,
+                    steps_per_sec_per_sec: max_accel_steps,
                 };
-                if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16, max_accel_steps) {
+                if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
                     brad.send_cmd_and_wait(Cmd::Segment(accel)).await?;
                     brad.send_cmd_and_wait(Cmd::Segment(decel)).await?;
                 } else {
@@ -251,11 +252,12 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
                 right_steps,
                 start_steps_per_sec: 34,
                 end_steps_per_sec: 34,
+                steps_per_sec_per_sec: MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC,
             };
             eprintln!("from {init_pos:?} to {pos:?}, seg {seg:?}");
             // TODO: these max-velocity and max-acceleration settings need to match the ones used
             // on the device, or else it doesn't really make sense...
-            if let Some((accel, decel)) = seg.split(500, 500) {
+            if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
                 brad.send_cmd(Cmd::Segment(accel)).await?;
                 brad.send_cmd(Cmd::Segment(decel)).await?;
             }
