@@ -75,12 +75,10 @@ impl GlobalState {
 
     pub fn set_config(&self, config: Config) {
         self.config.lock(|c| c.set(Some(config)));
-        self.write_to_flash();
     }
 
     pub fn set_position(&self, pos: StepperPositions) {
         self.position.lock(|p| p.set(Some(pos)));
-        self.write_to_flash();
     }
 
     pub fn write_to_flash(&self) {
@@ -128,6 +126,7 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, Stepp
 
     global.set_config(config);
     global.set_position(pos);
+    global.write_to_flash();
     (config, pos)
 }
 
@@ -184,10 +183,12 @@ async fn calibrated_control(
             }
             Cmd::PenUp => {
                 servo.set_angle(90);
+                GLOBAL.write_to_flash();
                 Timer::after_millis(50).await;
             }
             Cmd::PenDown => {
                 servo.set_angle(180);
+                GLOBAL.write_to_flash();
                 Timer::after_millis(50).await;
             }
         }

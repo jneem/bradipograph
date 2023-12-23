@@ -39,13 +39,11 @@ pub fn plan(
 
     let mut pen_is_up = true;
     for (subcurve_idx, subcurve) in curve.subcurves().enumerate() {
-        dbg!(subcurve);
         let mut last_steps_per_s = min_steps_per_s;
         let Some(m) = MotionCurve::<16384>::plan_one(subcurve, &planner_config, config) else {
             println!("error planning the curve");
             continue;
         };
-        dbg!(&m);
         let move_first =
             subcurve_idx == 0 || subcurve.insts.first().map_or(false, |i| !i.is_draw());
         for (i, (angs, energy)) in m.points.iter().zip(&m.energies).enumerate() {
@@ -86,6 +84,9 @@ pub fn plan(
             last_steps_per_s = end_steps_per_s;
             steps = target_steps;
         }
+    }
+    if !pen_is_up {
+        ret.push(Cmd::PenUp);
     }
 
     Ok(ret)
