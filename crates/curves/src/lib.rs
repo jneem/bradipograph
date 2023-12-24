@@ -95,16 +95,22 @@ pub struct Curve<const CAP: usize> {
     pub smooth_boundaries: Vec<CurveIdx, CAP>,
 }
 
-// TODO: a function to split a curve into multiple curves with a smaller capacity.
 impl<const CAP: usize> Curve<CAP> {
     pub fn extend(&mut self, path: &[PathEl]) -> Result<(), ()> {
-        let PathEl::MoveTo(start_point) = path.first().ok_or(())? else {
-            panic!("invalid bez path");
-        };
-
-        for el in path {
+        for (idx, el) in path.iter().enumerate() {
             let el = match *el {
-                PathEl::ClosePath => PathEl::LineTo(*start_point),
+                PathEl::ClosePath => {
+                    let start = path[..idx]
+                        .iter()
+                        .rev()
+                        .find_map(|el| match el {
+                            PathEl::MoveTo(p) => Some(p),
+                            _ => None,
+                        })
+                        .ok_or(())?;
+
+                    PathEl::LineTo(*start)
+                }
                 x => x,
             };
             self.push_el(&el)?;

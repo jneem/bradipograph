@@ -115,8 +115,13 @@ async fn send_file(
     svg::transform(&mut p, config);
 
     let cmds = plan(&p, &initial_position, config)?;
-    for cmd in cmds {
-        brad.send_cmd_and_wait(cmd).await?;
+    let chunks = cmds.chunks(32);
+
+    for chunk in chunks {
+        brad.wait_for_capacity(32).await?;
+        for cmd in chunk {
+            brad.send_cmd_and_wait(cmd.clone()).await?;
+        }
     }
 
     Ok(())

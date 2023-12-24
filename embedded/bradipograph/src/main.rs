@@ -26,6 +26,7 @@ use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::EspWifiInitFor;
 use espilepsy::Color;
+use heapless::spsc::Queue;
 use servo::Servo;
 use stepper::{Direction, Stepper};
 
@@ -40,7 +41,7 @@ macro_rules! singleton {
     }};
 }
 
-use ble::{ble_task, CmdChannel};
+use ble::{ble_task, CmdConsumer};
 
 pub type Channel<T, const N: usize> = embassy_sync::channel::Channel<CriticalSectionRawMutex, T, N>;
 pub type Sender<T, const N: usize> =
@@ -49,7 +50,6 @@ pub type Receiver<T, const N: usize> =
     embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, T, N>;
 pub type Mutex<T> = embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, T>;
 
-static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::new();
 
 const FLASH_ADDR: u32 = 0x110000;
@@ -154,14 +154,20 @@ async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) 
 }
 
 async fn calibrated_control(
-    cmds: Receiver<Cmd, 64>,
+    mut cmds: CmdConsumer,
     left: &mut Stepper,
     right: &mut Stepper,
     servo: &mut Servo,
 ) {
     let mut maybe_steps = GLOBAL.position();
     loop {
-        match cmds.receive().await {
+        let cmd = loop {
+            if let Some(cmd) = cmds.dequeue() {
+                break cmd;
+            }
+            Timer::after_millis(2).await
+        };
+        match cmd {
             Cmd::Segment(seg) => {
                 let Some(mut steps) = maybe_steps else {
                     println!("cannot move without a position");
@@ -182,14 +188,12 @@ async fn calibrated_control(
                 maybe_steps = Some(pos);
             }
             Cmd::PenUp => {
-                servo.set_angle(90);
+                servo.set_angle(90).await;
                 GLOBAL.write_to_flash();
-                Timer::after_millis(50).await;
             }
             Cmd::PenDown => {
-                servo.set_angle(180);
+                servo.set_angle(180).await;
                 GLOBAL.write_to_flash();
-                Timer::after_millis(50).await;
             }
         }
     }
@@ -219,7 +223,9 @@ async fn main(spawner: Spawner) {
     )
     .unwrap();
 
-    spawner.must_spawn(ble_task(init, peripherals.BT, CMD_CHANNEL.sender()));
+    let cmd_queue = singleton!(Queue::new(), Queue<Cmd, 64>);
+    let (cmd_tx, cmd_rx) = cmd_queue.split();
+    spawner.must_spawn(ble_task(init, peripherals.BT, cmd_tx));
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
     let rmt = Rmt::new(peripherals.RMT, 80u32.MHz(), clocks).unwrap();
@@ -282,14 +288,14 @@ async fn main(spawner: Spawner) {
         })
         .unwrap();
     let mut servo = Servo::new(servo_channel);
-    servo.set_angle(90);
+    servo.set_angle(90).await;
 
     let mut buf = [0u8; 256];
     let mut flash = FlashStorage::new();
     flash.read(FLASH_ADDR, &mut buf).unwrap();
 
     GLOBAL.read_from_flash();
-    calibrated_control(CMD_CHANNEL.receiver(), &mut left, &mut right, &mut servo).await;
+    calibrated_control(cmd_rx, &mut left, &mut right, &mut servo).await;
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]

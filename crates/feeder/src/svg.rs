@@ -28,7 +28,7 @@ pub fn plan(
     let planner_config = PlannerConfig {
         max_energy: max_rads_per_sec * max_rads_per_sec,
         max_acceleration: max_rads_per_sec * MAX_VELOCITY_PER_SEC as f64,
-        accuracy: 0.1,
+        accuracy: 0.05,
     };
 
     let mut steps = config.point_to_steps(initial_position);

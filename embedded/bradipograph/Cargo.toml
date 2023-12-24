@@ -21,7 +21,7 @@ esp32c3-hal = { version = "0.14.0", features = ["embassy", "embassy-time-timg0",
 espilepsy = "0.2"
 fixed = "1.24.0"
 futures = { version = "0.3.29", default-features = false }
-heapless = { version = "0.8.0", features = ["serde"] }
+heapless = { version = "0.8.0", features = ["serde", "portable-atomic"] }
 kurbo = { git = "https://github.com/jneem/kurbo", branch = "no-alloc", default-features = false }
 libm = "0.2.8"
 num-derive = { version = "0.4.1", default-features = false }

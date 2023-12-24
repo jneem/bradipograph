@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::anyhow;
 use bradipous_protocol::{CalibrationStatus, Cmd};
 use btleplug::{
@@ -9,11 +11,13 @@ use uuid::{uuid, Uuid};
 
 pub const CONTROL_UUID: Uuid = uuid!("68a79628-2609-4569-8d7d-3b29fde28877");
 pub const CALIBRATION_UUID: Uuid = uuid!("68a79629-2609-4569-8d7d-3b29fde28877");
+pub const CAPACITY_UUID: Uuid = uuid!("68a7962a-2609-4569-8d7d-3b29fde28877");
 
 pub struct Bradipograph {
     pub peripheral: Peripheral,
     pub control: Characteristic,
     pub calibration: Characteristic,
+    pub capacity: Characteristic,
 }
 
 impl Bradipograph {
@@ -30,10 +34,17 @@ impl Bradipograph {
             .find(|ch| ch.uuid == CALIBRATION_UUID)
             .ok_or_else(|| anyhow!("Bradipous was missing the calibration characteristic"))?;
 
+        let capacity = peripheral
+            .characteristics()
+            .into_iter()
+            .find(|ch| ch.uuid == CAPACITY_UUID)
+            .ok_or_else(|| anyhow!("Bradipous was missing the capacity characteristic"))?;
+
         Ok(Bradipograph {
             peripheral,
             control,
             calibration,
+            capacity,
         })
     }
 
@@ -58,6 +69,16 @@ impl Bradipograph {
             .write(&self.control, &buf, WriteType::WithResponse)
             .await?;
         Ok(())
+    }
+
+    pub async fn wait_for_capacity(&self, count: usize) -> anyhow::Result<()> {
+        loop {
+            let data = self.peripheral.read(&self.capacity).await?;
+            if data.len() == 1 && data[0] as usize >= count {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
     }
 }
 
