@@ -2,7 +2,6 @@
 
 resolver = "2"
 members = [ 
-  "crates/curves",
   "crates/feeder",
   "crates/feeder",
   "crates/geom",
