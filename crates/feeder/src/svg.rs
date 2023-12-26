@@ -1,16 +1,16 @@
 use std::path::Path;
 
-use anyhow::anyhow;
-use bradipous_curves::Curve;
 use bradipous_geom::{Angle, RotorAngles};
 use bradipous_planner::{MotionCurve, PlannerConfig};
 use bradipous_protocol::{Cmd, StepperSegment};
-use kurbo::{Affine, BezPath, Point, Rect, Shape};
+use kurbo::{Affine, BezPath, ParamCurve as _, PathSeg, Point, Rect, Shape};
 use usvg::{tiny_skia_path::PathSegment, TreeParsing};
 
-const MAX_STEPS_PER_SEC: u32 = 500;
+use crate::mv;
+
+const MAX_STEPS_PER_SEC: u32 = 400;
 // what fraction of a second does it take to reach max velocity
-const MAX_VELOCITY_PER_SEC: u32 = 1;
+const MAX_VELOCITY_PER_SEC: u32 = 2;
 
 pub fn plan(
     p: &BezPath,
@@ -31,30 +31,31 @@ pub fn plan(
         accuracy: 0.05,
     };
 
-    let mut steps = config.point_to_steps(initial_position);
-    let mut curve = Curve::<8192>::default();
-    if curve.extend(p.elements()).is_err() {
-        Err(anyhow!("This curve is too complicated!"))?
-    }
+    let mut pos = *initial_position;
+    let mut steps;
+    let mut smooth_parts = bradipous_planner::smoother::SmoothParts::new(p.segments());
 
     let mut pen_is_up = true;
-    for (subcurve_idx, subcurve) in curve.subcurves().enumerate() {
-        let mut last_steps_per_s = min_steps_per_s;
-        let Some(m) = MotionCurve::<16384>::plan_one(subcurve, &planner_config, config) else {
-            println!("error planning the curve");
-            continue;
-        };
-        let move_first =
-            subcurve_idx == 0 || subcurve.insts.first().map_or(false, |i| !i.is_draw());
-        for (i, (angs, energy)) in m.points.iter().zip(&m.energies).enumerate() {
-            if i == 0 && move_first {
-                ret.push(Cmd::PenUp);
-                pen_is_up = true;
-            } else if pen_is_up {
-                ret.push(Cmd::PenDown);
-                pen_is_up = false;
-            }
+    while let Some(part) = smooth_parts.next_part() {
+        let part: Vec<PathSeg> = part.collect();
+        let draw_start = part[0].eval(0.0);
+        let mut move_to = mv(config, pos, draw_start);
+        if !pen_is_up && !move_to.is_empty() {
+            ret.push(Cmd::PenUp);
+            pen_is_up = true;
+        }
+        ret.append(&mut move_to);
+        steps = config.point_to_steps(&draw_start);
 
+        let mut last_steps_per_s = min_steps_per_s;
+        let plan = MotionCurve::plan_one(&part, &planner_config, config);
+
+        if pen_is_up {
+            ret.push(Cmd::PenDown);
+            pen_is_up = false;
+        }
+
+        for (angs, energy) in plan.points.iter().zip(&plan.energies) {
             let end_steps_per_s = ((energy.sqrt() * steps_per_radian) as u16).max(min_steps_per_s);
             let angles = RotorAngles {
                 left: Angle::from_radians(angs.x),
@@ -84,7 +85,10 @@ pub fn plan(
             last_steps_per_s = end_steps_per_s;
             steps = target_steps;
         }
+
+        pos = config.steps_to_point(&steps);
     }
+
     if !pen_is_up {
         ret.push(Cmd::PenUp);
     }

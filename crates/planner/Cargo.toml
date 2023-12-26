@@ -6,18 +6,16 @@ edition = "2021"
 [features]
 
 [dependencies]
-heapless = { version = "0.8.0", features = ["serde"] }
 kurbo = { workspace = true, features = ["serde"] }
 serde = { version = "1.0.190", features = ["derive"] }
-bradipous-curves = { path = "../curves" }
-libm = "0.2.8"
-fixed = "1.24.0"
 
 [dev-dependencies]
 anyhow = "1.0.75"
 bradipous-geom = { path = "../geom" }
 clap = { version = "4.4.7", features = ["derive"] }
 kurbo = { workspace = true, features = ["std"] }
+piet = "0.6.2"
+piet-svg = "0.6.2"
 proptest = "1.4.0"
 proptest-derive = "0.4.0"
 serde_json = "1.0.107"

@@ -2,7 +2,7 @@ use embassy_time::Timer;
 use esp32c3_hal::{
     gpio::{GpioPin, Output, PushPull},
     ledc::{
-        channel::{Channel, ChannelHW as _, ChannelIFace as _},
+        channel::{Channel, ChannelHW as _},
         LowSpeed,
     },
 };

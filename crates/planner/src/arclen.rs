@@ -2,7 +2,6 @@ use kurbo::{
     common::{GAUSS_LEGENDRE_COEFFS_16, GAUSS_LEGENDRE_COEFFS_24, GAUSS_LEGENDRE_COEFFS_8},
     CubicBez, ParamCurve, ParamCurveArclen, ParamCurveCurvature, ParamCurveDeriv,
 };
-use libm::{fabs, sqrt};
 
 use crate::{Transform, TransformedCurve};
 
@@ -158,7 +157,7 @@ where
         .iter()
         .map(|(wi, xi)| {
             let t = 0.5 * (xi + 1.0); // Transform the interval from [-1, 1] to [0, 1]
-            wi * d.eval(t).to_vec2().hypot() * sqrt(fabs(c.curvature(t)))
+            wi * d.eval(t).to_vec2().hypot() * c.curvature(t).abs().sqrt()
         })
         .sum::<f64>()
         * 0.5

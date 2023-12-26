@@ -1,15 +1,11 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
 use arclen::{bendiness, inv_bendiness};
-use bradipous_curves::{Curve, CurveRef};
-use heapless::Vec;
 use kurbo::{
     CubicBez, Line, ParamCurve, ParamCurveArclen, ParamCurveCurvature, PathEl, PathSeg, Point,
     QuadBez, Vec2,
 };
-use libm::{fabs, sqrt};
 
 mod arclen;
+pub mod smoother;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Velocity {
@@ -59,10 +55,10 @@ impl proptest::arbitrary::Arbitrary for Accel {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct MotionCurve<const CAP: usize> {
-    pub points: Vec<Point, CAP>,
-    pub energies: Vec<f64, CAP>,
+#[derive(Clone, Debug, serde::Serialize, Default)]
+pub struct MotionCurve {
+    pub points: Vec<Point>,
+    pub energies: Vec<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -72,49 +68,30 @@ pub struct PlannerConfig {
     pub accuracy: f64,
 }
 
-// TODO: right now, if we run out of capacity then we panic. Be more robust.
-impl<const CAP: usize> MotionCurve<CAP> {
-    pub fn plan<const C: usize>(
-        path: &Curve<C>,
-        config: &PlannerConfig,
-        transform: &impl Transform,
-    ) -> Option<Self> {
+impl MotionCurve {
+    pub fn plan_one(path: &[PathSeg], config: &PlannerConfig, transform: &impl Transform) -> Self {
         let mut ret = MotionCurve {
             points: Vec::new(),
             energies: Vec::new(),
         };
 
-        for seg in path.subcurves() {
-            ret.append_smooth_path(seg, config, transform)?;
-        }
+        ret.append_smooth_path(path, config, transform);
 
-        Some(ret)
-    }
-
-    pub fn plan_one(
-        path: CurveRef<'_>,
-        config: &PlannerConfig,
-        transform: &impl Transform,
-    ) -> Option<Self> {
-        let mut ret = MotionCurve {
-            points: Vec::new(),
-            energies: Vec::new(),
-        };
-
-        ret.append_smooth_path(path, config, transform)?;
-
-        Some(ret)
+        ret
     }
 
     fn append_smooth_path(
         &mut self,
-        path: CurveRef<'_>,
+        segments: &[PathSeg],
         config: &PlannerConfig,
         transform: &impl Transform,
-    ) -> Option<()> {
-        let transformed_path = TransformedPath { path, transform };
+    ) {
+        let transformed_path = TransformedPath {
+            segments,
+            transform,
+        };
 
-        let plan = Energizer::<CAP>::plan(
+        let plan = Energizer::plan(
             &transformed_path,
             // FIXME: get rid of this magic 10.0 constant
             config.accuracy * 10.0,
@@ -125,8 +102,7 @@ impl<const CAP: usize> MotionCurve<CAP> {
         // TODO: panics if not enough capacity
         self.points
             .extend(transformed_path.evals(plan.time.iter().copied()));
-        self.energies.extend_from_slice(&plan.energy).ok()?;
-        Some(())
+        self.energies.extend_from_slice(&plan.energy);
     }
 }
 
@@ -177,7 +153,7 @@ pub struct TransformedCurve<T> {
 }
 
 pub struct TransformedPath<'a, T> {
-    pub path: CurveRef<'a>,
+    pub segments: &'a [PathSeg],
     pub transform: &'a T,
 }
 
@@ -189,7 +165,7 @@ impl<'a, T: Transform + Clone> TransformedPath<'a, T> {
     where
         'a: 'b,
     {
-        let mut segs = self.path.segments();
+        let mut segs = self.segments.iter().copied();
         let mut seg_idx = 0;
         let mut seg = segs.next();
         ts.scan((), move |_, t| {
@@ -232,20 +208,20 @@ impl<'a, T: Transform + Clone> TransformedPath<'a, T> {
 }
 
 #[derive(Debug)]
-pub struct Energizer<const CAP: usize> {
+pub struct Energizer {
     pub emax: f64,
     pub amax: f64,
-    pub increments: Vec<f64, CAP>,
-    pub time: Vec<PathTime, CAP>,
-    pub curvature: Vec<f64, CAP>,
-    pub energy: Vec<f64, CAP>,
+    pub increments: Vec<f64>,
+    pub time: Vec<PathTime>,
+    pub curvature: Vec<f64>,
+    pub energy: Vec<f64>,
 }
 
 fn square(x: f64) -> f64 {
     x * x
 }
 
-impl<const CAP: usize> Energizer<CAP> {
+impl Energizer {
     pub fn plan<T: Transform + Clone>(
         path: &TransformedPath<T>,
         increment: f64,
@@ -267,10 +243,10 @@ impl<const CAP: usize> Energizer<CAP> {
         let mut time = Vec::new();
         let mut increments = Vec::new();
         discretize_time(path, increment, &mut time, &mut increments);
-        let curvature: Vec<_, CAP> = path.curvatures(time.iter().cloned()).collect();
+        let curvature: Vec<_> = path.curvatures(time.iter().cloned()).collect();
         let energy = curvature
             .iter()
-            .map(|kappa| emax.min(2. * amax / fabs(*kappa)))
+            .map(|kappa| emax.min(2. * amax / kappa.abs()))
             .collect();
 
         Self {
@@ -295,7 +271,7 @@ impl<const CAP: usize> Energizer<CAP> {
             .skip(1)
             .zip(&self.increments)
         {
-            let deriv_bound = sqrt(square(self.amax) - square(last * curvature) / 4.);
+            let deriv_bound = (square(self.amax) - square(last * curvature) / 4.).sqrt();
             *energy_bound = energy_bound.min(last + increment * deriv_bound);
             last = *energy_bound;
         }
@@ -310,7 +286,7 @@ impl<const CAP: usize> Energizer<CAP> {
         for ((energy_bound, curvature), increment) in
             energies.zip(curvatures).skip(1).zip(increments)
         {
-            let deriv_bound = sqrt(square(self.amax) - square(last * curvature) / 4.);
+            let deriv_bound = (square(self.amax) - square(last * curvature) / 4.).sqrt();
             *energy_bound = energy_bound.min(last + increment * deriv_bound);
             last = *energy_bound;
         }
@@ -329,17 +305,17 @@ impl PathTime {
     }
 }
 
-pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
+pub fn discretize_time<T: Transform + Clone>(
     path: &TransformedPath<T>,
     increment: f64,
-    times: &mut Vec<PathTime, CAP>,
-    increments: &mut Vec<f64, CAP>,
-) -> Option<()> {
-    times.push(PathTime::new(0, 0.0)).ok()?;
+    times: &mut Vec<PathTime>,
+    increments: &mut Vec<f64>,
+) {
+    times.push(PathTime::new(0, 0.0));
 
     let mut bend_accumulated = 0.0;
     let mut arclen_accumulated = 0.0;
-    for (idx, seg) in path.path.segments().enumerate() {
+    for (idx, seg) in path.segments.iter().enumerate() {
         let transformed = TransformedCurve {
             curve: seg.to_cubic(),
             transform: path.transform.clone(),
@@ -360,8 +336,8 @@ pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
             bend_accumulated += bend_step;
             arclen_accumulated += transformed.subsegment(prev_t..t).arclen(1e-6);
             if bend_accumulated >= 0.99 * increment {
-                times.push(PathTime::new(idx, t)).ok()?;
-                increments.push(arclen_accumulated).ok()?;
+                times.push(PathTime::new(idx, t));
+                increments.push(arclen_accumulated);
                 bend_accumulated = 0.0;
                 arclen_accumulated = 0.0;
             }
@@ -375,10 +351,8 @@ pub fn discretize_time<T: Transform + Clone, const CAP: usize>(
     }
 
     if arclen_accumulated > 1e-3 {
-        let idx = path.path.segments().count() - 1;
-        times.push(PathTime::new(idx, 1.0)).ok()?;
-        increments.push(arclen_accumulated).ok()?;
+        let idx = path.segments.len() - 1;
+        times.push(PathTime::new(idx, 1.0));
+        increments.push(arclen_accumulated);
     }
-
-    Some(())
 }

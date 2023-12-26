@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
-bradipous-curves = { version = "0.1.0", path = "../curves" }
 bradipous-geom = { version = "0.1.0", path = "../geom" }
 bradipous-planner = { version = "0.1.0", path = "../planner" }
 bradipous-protocol = { version = "0.1.0", path = "../protocol" }

@@ -30,6 +30,8 @@
         devShell = pkgs.mkShell {
           buildInputs = [ pkgs.pkg-config ];
           nativeBuildInputs = with pkgs; [
+            cmake
+            freetype
             dbus
             rust-toolchain
             python-toolchain

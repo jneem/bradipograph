@@ -131,15 +131,16 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, Stepp
 }
 
 async fn move_seg(seg: StepperSegment, left: &mut Stepper, right: &mut Stepper) {
+    // This is for "underarm" orientation.
     let right_dir = if seg.right_steps > 0 {
-        Direction::Clockwise
-    } else {
         Direction::CounterClockwise
+    } else {
+        Direction::Clockwise
     };
     let left_dir = if seg.left_steps > 0 {
-        Direction::CounterClockwise
-    } else {
         Direction::Clockwise
+    } else {
+        Direction::CounterClockwise
     };
 
     for tick in seg.iter_steps() {
@@ -192,7 +193,7 @@ async fn calibrated_control(
                 GLOBAL.write_to_flash();
             }
             Cmd::PenDown => {
-                servo.set_angle(180).await;
+                servo.set_angle(0).await;
                 GLOBAL.write_to_flash();
             }
         }

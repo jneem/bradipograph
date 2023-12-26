@@ -24,9 +24,9 @@ mod connection;
 mod svg;
 
 const TICK: Duration = Duration::from_millis(50);
-const MAX_STEPS_PER_SEC: u32 = 500;
+const MAX_STEPS_PER_SEC: u32 = 400;
 // what fraction of a second does it take to reach max velocity
-const MAX_VELOCITY_PER_SEC: u32 = 1;
+const MAX_VELOCITY_PER_SEC: u32 = 2;
 
 #[derive(Parser)]
 struct Args {
@@ -49,6 +49,29 @@ where
 }
 
 type Result<T> = std::result::Result<T, Error>;
+
+fn mv(config: &bradipous_geom::Config, from: Point, to: Point) -> Vec<Cmd> {
+    let from_steps = config.point_to_steps(&from);
+    let to_steps = config.point_to_steps(&to);
+    if from_steps == to_steps {
+        return vec![];
+    }
+    let right_steps = to_steps.right as i32 - from_steps.right as i32;
+    let left_steps = to_steps.left as i32 - from_steps.left as i32;
+    let seg = StepperSegment {
+        left_steps,
+        right_steps,
+        start_steps_per_sec: 34,
+        end_steps_per_sec: 34,
+        steps_per_sec_per_sec: MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC,
+    };
+    eprintln!("move from {from} to {to}, {seg:?}");
+    if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
+        vec![Cmd::Segment(accel), Cmd::Segment(decel)]
+    } else {
+        vec![Cmd::Segment(seg)]
+    }
+}
 
 async fn connect(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
     let progress = MultiProgress::new();
@@ -115,6 +138,7 @@ async fn send_file(
     svg::transform(&mut p, config);
 
     let cmds = plan(&p, &initial_position, config)?;
+    dbg!(&cmds);
     let chunks = cmds.chunks(32);
 
     for chunk in chunks {
@@ -135,6 +159,7 @@ async fn draw_box(
     let bbox = config.draw_box();
     let path: BezPath = bbox.path_elements(0.01).collect();
     let cmds = plan(&path, &initial_position, config)?;
+    dbg!(&cmds);
     for cmd in cmds {
         brad.send_cmd_and_wait(cmd).await?;
     }
@@ -190,6 +215,8 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
             let Some(y) = read_number(&mut reed, "y")? else {
                 continue;
             };
+            // FIXME: this is not the right way to get the current position,
+            // because there could be other move commands in the queue.
             let calib = brad.read_calibration().await?;
             let CalibrationStatus::Calibrated(calib, steps) = calib else {
                 eprintln!("Cannot move, you must calibrate first");
@@ -197,22 +224,9 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
             };
             let config = Config::from(calib);
             let init_pos = config.steps_to_point(&steps);
-            let init_steps = config.point_to_steps(&init_pos);
             let pos = Point::new(x.into(), y.into());
-            let steps = config.point_to_steps(&pos);
-            let right_steps = steps.right as i32 - init_steps.right as i32;
-            let left_steps = steps.left as i32 - init_steps.left as i32;
-            let seg = StepperSegment {
-                left_steps,
-                right_steps,
-                start_steps_per_sec: 34,
-                end_steps_per_sec: 34,
-                steps_per_sec_per_sec: MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC,
-            };
-            eprintln!("from {init_pos:?} to {pos:?}, seg {seg:?}");
-            if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
-                brad.send_cmd(Cmd::Segment(accel)).await?;
-                brad.send_cmd(Cmd::Segment(decel)).await?;
+            for cmd in mv(&config, init_pos, pos) {
+                brad.send_cmd(cmd).await?;
             }
         } else if s == "query" {
             let calib = brad.read_calibration().await?;

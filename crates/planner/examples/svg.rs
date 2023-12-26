@@ -3,11 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bradipous_curves::Curve;
 use bradipous_geom::ConfigBuilder;
-use bradipous_planner::{MotionCurve, PlannerConfig};
+use bradipous_planner::{smoother::SmoothParts, MotionCurve, PlannerConfig};
 use clap::Parser as _;
-use kurbo::{Affine, BezPath, Rect, Shape};
+use kurbo::{Affine, BezPath, Shape, Size};
+use piet::{
+    kurbo::{Circle, Line},
+    Color, RenderContext,
+};
 use usvg::{tiny_skia_path::PathSegment, TreeParsing};
 
 #[derive(clap::Parser)]
@@ -59,15 +62,47 @@ pub fn main() -> anyhow::Result<()> {
         accuracy: args.accuracy,
     };
 
-    let mut curve = Curve::<1024>::default();
+    let mut c = MotionCurve::default();
+
     for p in paths.iter() {
-        curve.extend(p.elements()).unwrap();
+        let mut smooth = SmoothParts::new(p.segments());
+        while let Some(part) = smooth.next_part() {
+            let segs = part.collect::<Vec<_>>();
+            dbg!(&segs);
+            let m = MotionCurve::plan_one(&segs, &config, &geom_config);
+            c.points.extend(m.points);
+            c.energies.extend(m.energies);
+        }
     }
-    let m = MotionCurve::<1024>::plan(&curve, &config, &geom_config);
-    let out = File::create(&args.output)?;
+    dbg!(&c);
+    visualize(args.output, &c)?;
 
-    serde_json::to_writer(out, &m)?;
+    Ok(())
+}
 
+fn extrema(xs: impl Iterator<Item = f64> + Clone) -> (f64, f64) {
+    let max = xs.clone().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+    let min = xs.clone().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+    (min, max)
+}
+
+fn visualize(out_path: impl AsRef<Path>, mc: &MotionCurve) -> anyhow::Result<()> {
+    let (_x_min, x_max) = extrema(mc.points.iter().map(|p| p.x));
+    let (_y_min, y_max) = extrema(mc.points.iter().map(|p| p.y));
+    let (_e_min, e_max) = extrema(mc.energies.iter().copied());
+    // Not sure how to set a different viewbox?
+    let mut piet = piet_svg::RenderContext::new(piet::kurbo::Size::new(x_max + 1.0, y_max + 1.0));
+
+    for (p, e) in mc.points.iter().zip(&mc.energies) {
+        let p = piet::kurbo::Point::new(p.x, p.y);
+        piet.fill(
+            Circle::new(p, 1.0),
+            &Color::hlc(e / e_max * 270.0, 50.0, 127.0),
+        );
+    }
+    piet.finish().unwrap();
+    let file = File::create(out_path)?;
+    piet.write(file)?;
     Ok(())
 }
 
