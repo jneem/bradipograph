@@ -8,7 +8,7 @@ use bradipous_geom::{ArmLengths, Config, ConfigBuilder, StepperPositions};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 use embedded_storage::{ReadStorage, Storage};
 use esp32c3_hal::{
     clock::{ClockControl, Clocks},
@@ -16,16 +16,14 @@ use esp32c3_hal::{
     ledc::{self, timer, LSGlobalClkSource, LowSpeed, LEDC},
     peripherals::Peripherals,
     prelude::*,
-    rmt::{Channel as RmtChannel, TxChannelCreator},
     systimer::{self},
     timer::TimerGroup,
-    Rmt, Rng, IO,
+    Rng, IO,
 };
 use esp_backtrace as _;
 use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::EspWifiInitFor;
-use espilepsy::Color;
 use heapless::spsc::Queue;
 use servo::Servo;
 use stepper::{Direction, Stepper};
@@ -49,8 +47,6 @@ pub type Sender<T, const N: usize> =
 pub type Receiver<T, const N: usize> =
     embassy_sync::channel::Receiver<'static, CriticalSectionRawMutex, T, N>;
 pub type Mutex<T> = embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, T>;
-
-static LED_CHANNEL: espilepsy::CmdChannel<CriticalSectionRawMutex> = Channel::new();
 
 const FLASH_ADDR: u32 = 0x110000;
 
@@ -200,14 +196,6 @@ async fn calibrated_control(
     }
 }
 
-#[embassy_executor::task]
-async fn led_task(
-    rmt_channel: RmtChannel<0>,
-    recv: espilepsy::CmdReceiver<'static, CriticalSectionRawMutex>,
-) {
-    espilepsy::task(rmt_channel, recv).await;
-}
-
 #[main]
 async fn main(spawner: Spawner) {
     let peripherals = Peripherals::take();
@@ -229,27 +217,6 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(ble_task(init, peripherals.BT, cmd_tx));
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-    let rmt = Rmt::new(peripherals.RMT, 80u32.MHz(), clocks).unwrap();
-    let rmt_channel = rmt
-        .channel0
-        .configure(
-            io.pins.gpio7,
-            esp32c3_hal::rmt::TxChannelConfig {
-                clk_divider: 1,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-    spawner.must_spawn(led_task(rmt_channel, LED_CHANNEL.receiver()));
-
-    LED_CHANNEL
-        .send(espilepsy::Cmd::Blinky {
-            color0: Color { r: 0, g: 0, b: 0 },
-            color1: Color { r: 32, g: 0, b: 0 },
-            period: Duration::from_secs(1),
-        })
-        .await;
 
     let mut right = Stepper::new(
         io.pins.gpio0.into_push_pull_output(),
@@ -260,8 +227,8 @@ async fn main(spawner: Spawner) {
     let mut left = Stepper::new(
         io.pins.gpio4.into_push_pull_output(),
         io.pins.gpio5.into_push_pull_output(),
-        io.pins.gpio8.into_push_pull_output(),
-        io.pins.gpio10.into_push_pull_output(),
+        io.pins.gpio6.into_push_pull_output(),
+        io.pins.gpio7.into_push_pull_output(),
     );
 
     let ledc = singleton!(LEDC::new(peripherals.LEDC, clocks), LEDC<'static>);
@@ -279,7 +246,7 @@ async fn main(spawner: Spawner) {
         .unwrap();
     let mut servo_channel = ledc.get_channel::<LowSpeed, _>(
         ledc::channel::Number::Channel0,
-        io.pins.gpio6.into_push_pull_output(),
+        io.pins.gpio10.into_push_pull_output(),
     );
     servo_channel
         .configure(ledc::channel::config::Config {

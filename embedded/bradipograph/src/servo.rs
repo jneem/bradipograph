@@ -8,12 +8,12 @@ use esp32c3_hal::{
 };
 
 pub struct Servo {
-    channel: Channel<'static, LowSpeed, GpioPin<Output<PushPull>, 6>>,
+    channel: Channel<'static, LowSpeed, GpioPin<Output<PushPull>, 10>>,
     current_duty: u16,
 }
 
 impl Servo {
-    pub fn new(ch: Channel<'static, LowSpeed, GpioPin<Output<PushPull>, 6>>) -> Self {
+    pub fn new(ch: Channel<'static, LowSpeed, GpioPin<Output<PushPull>, 10>>) -> Self {
         Self {
             channel: ch,
             current_duty: Servo::duty_for_angle(90),

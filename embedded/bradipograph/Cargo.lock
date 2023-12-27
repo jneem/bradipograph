@@ -164,16 +164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bradipous-curves"
-version = "0.1.0"
-dependencies = [
- "heapless 0.8.0",
- "kurbo",
- "libm",
- "serde",
-]
-
-[[package]]
 name = "bradipous-geom"
 version = "0.1.0"
 dependencies = [
@@ -186,7 +176,6 @@ dependencies = [
 name = "bradipous-protocol"
 version = "0.1.0"
 dependencies = [
- "bradipous-curves",
  "bradipous-geom",
  "serde",
 ]
