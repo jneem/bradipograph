@@ -2,7 +2,10 @@
 
 use core::f64::consts::PI;
 
-use kurbo::{Point, Rect, Vec2};
+#[cfg(feature = "std")]
+use kurbo::Vec2;
+
+use kurbo::{Point, Rect};
 use libm::{sqrt, tan};
 
 fn square(x: f64) -> f64 {
@@ -96,30 +99,6 @@ impl ConfigBuilder {
         }
     }
 
-    /// Hanging calibration works like this: the claws are positioned an unknown
-    /// distance apart (perfectly horizontal from one another). We manually
-    /// position the head at a known position relative to the left claw, and
-    /// then move it to the symmetric position relative to the right claw.
-    /// We record the change in the arm lengths when moving from one of these
-    /// positions to the other (by symmetry, it should be the same for both
-    /// arms).
-    ///
-    /// `hang` is the distance that the head was hanging below the claws, `x_offset`
-    /// is the distance that the head was to the side of the claws, and
-    /// `arm_change` is the change in arm lengths when moving from one hanging
-    /// position to the other.
-    pub fn with_hanging_calibration(
-        &mut self,
-        hang: f64,
-        x_offset: f64,
-        arm_change: f64,
-    ) -> &mut Self {
-        let a = sqrt(square(hang) + square(x_offset));
-        self.claw_distance =
-            x_offset + sqrt(square(x_offset) + square(arm_change) + 2.0 * arm_change * a);
-        self
-    }
-
     pub fn with_max_hang(&mut self, max_hang: f64) -> &mut Self {
         self.max_hang = max_hang;
         self
@@ -132,6 +111,16 @@ impl ConfigBuilder {
 
     pub fn with_claw_distance(&mut self, claw_distance: f64) -> &mut Self {
         self.claw_distance = claw_distance;
+        self
+    }
+
+    pub fn with_min_angle(&mut self, angle: Angle) -> &mut Self {
+        self.min_angle = angle;
+        self
+    }
+
+    pub fn with_steps_per_revolution(&mut self, steps: f64) -> &mut Self {
+        self.steps_per_revolution = steps;
         self
     }
 }
@@ -222,7 +211,7 @@ impl Config {
             -self.claw_distance / 2.0 + self.side_inset,
             0.0,
             self.claw_distance / 2.0 - self.side_inset,
-            self.max_hang,
+            self.max_hang - self.hang_offset,
         )
     }
 }

@@ -4,7 +4,7 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{ArmLengths, Config, ConfigBuilder, StepperPositions};
+use bradipous_geom::{Angle, ArmLengths, Config, ConfigBuilder, StepperPositions};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -71,6 +71,15 @@ impl GlobalState {
 
     pub fn set_config(&self, config: Config) {
         self.config.lock(|c| c.set(Some(config)));
+    }
+
+    pub fn modify_config(&self, f: impl FnOnce(&mut Config)) {
+        self.config.lock(|cell| {
+            if let Some(mut c) = cell.get() {
+                f(&mut c);
+                cell.set(Some(c));
+            }
+        });
     }
 
     pub fn set_position(&self, pos: StepperPositions) {
@@ -183,6 +192,14 @@ async fn calibrated_control(
                 let (_, pos) = apply_calibration(&GLOBAL, calibration);
 
                 maybe_steps = Some(pos);
+            }
+            Cmd::SetMinAngleDegrees(deg) => {
+                GLOBAL.modify_config(|c| c.min_angle = Angle::from_degrees(deg as f64));
+                GLOBAL.write_to_flash();
+            }
+            Cmd::SetMaxHang(h) => {
+                GLOBAL.modify_config(|c| c.max_hang = h as f64);
+                GLOBAL.write_to_flash();
             }
             Cmd::PenUp => {
                 servo.set_angle(90).await;

@@ -6,11 +6,8 @@ use std::{
 use bradipous_geom::ConfigBuilder;
 use bradipous_planner::{smoother::SmoothParts, MotionCurve, PlannerConfig};
 use clap::Parser as _;
-use kurbo::{Affine, BezPath, Shape, Size};
-use piet::{
-    kurbo::{Circle, Line},
-    Color, RenderContext,
-};
+use kurbo::{Affine, BezPath, Shape};
+use piet::{kurbo::Circle, Color, RenderContext};
 use usvg::{tiny_skia_path::PathSegment, TreeParsing};
 
 #[derive(clap::Parser)]

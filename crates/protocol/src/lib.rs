@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use bradipous_geom::StepperPositions;
+use bradipous_geom::{Angle, StepperPositions};
 use serde::{Deserialize, Serialize};
 
 mod stepper;
@@ -24,42 +24,35 @@ pub struct Calibration {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[allow(clippy::large_enum_variant)]
 pub enum Cmd {
     Calibrate(Calibration),
+    SetMaxHang(f32),
+    SetMinAngleDegrees(f32),
     Segment(StepperSegment),
     PenUp,
     PenDown,
 }
 
-// TODO: clarify the relationship between this config and bradipous_geom::Config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Config {
+pub struct State {
     pub claw_distance: f32,
     pub spool_radius: f32,
     pub max_hang: f32,
     pub min_angle_deg: f32,
     pub steps_per_revolution: f32,
+
+    pub position: StepperPositions,
+    pub pen_down: bool,
 }
 
-impl From<bradipous_geom::Config> for Config {
-    fn from(c: bradipous_geom::Config) -> Self {
-        Config {
-            claw_distance: c.claw_distance as f32,
-            spool_radius: c.spool_radius as f32,
-            max_hang: c.max_hang as f32,
-            min_angle_deg: c.min_angle.degrees() as f32,
-            steps_per_revolution: c.steps_per_revolution as f32,
-        }
-    }
-}
-
-impl From<Config> for bradipous_geom::Config {
-    fn from(c: Config) -> Self {
+impl State {
+    pub fn geom(&self) -> bradipous_geom::Config {
         bradipous_geom::ConfigBuilder::default()
-            .with_max_hang(c.max_hang as f64)
-            .with_spool_radius(c.spool_radius as f64)
-            .with_claw_distance(c.claw_distance as f64)
+            .with_max_hang(self.max_hang.into())
+            .with_spool_radius(self.spool_radius.into())
+            .with_claw_distance(self.claw_distance.into())
+            .with_min_angle(Angle::from_degrees(self.min_angle_deg.into()))
+            .with_steps_per_revolution(self.steps_per_revolution.into())
             .build()
     }
 }
@@ -67,5 +60,5 @@ impl From<Config> for bradipous_geom::Config {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CalibrationStatus {
     Uncalibrated,
-    Calibrated(Config, StepperPositions),
+    Calibrated(State),
 }

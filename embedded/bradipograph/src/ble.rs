@@ -11,7 +11,7 @@ use esp32c3_hal::peripherals::BT;
 use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
 
-use bradipous_protocol::{CalibrationStatus, Cmd};
+use bradipous_protocol::{CalibrationStatus, Cmd, State};
 use heapless::spsc::{Consumer, Producer};
 
 use crate::GLOBAL;
@@ -62,7 +62,19 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmd_tx
 
         let mut calibration_status = |offset: usize, data: &mut [u8]| {
             let msg = match (GLOBAL.config(), GLOBAL.position()) {
-                (Some(config), Some(pos)) => CalibrationStatus::Calibrated(config.into(), pos),
+                (Some(config), Some(pos)) => {
+                    let state = State {
+                        claw_distance: config.claw_distance as f32,
+                        spool_radius: config.spool_radius as f32,
+                        max_hang: config.max_hang as f32,
+                        min_angle_deg: config.min_angle.degrees() as f32,
+                        steps_per_revolution: config.steps_per_revolution as f32,
+                        position: pos,
+                        // TODO: think about how to handle pen_down
+                        pen_down: false,
+                    };
+                    CalibrationStatus::Calibrated(state)
+                }
                 _ => CalibrationStatus::Uncalibrated,
             };
 

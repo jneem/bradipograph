@@ -48,7 +48,7 @@ impl Bradipograph {
         })
     }
 
-    pub async fn read_calibration(&self) -> anyhow::Result<CalibrationStatus> {
+    pub async fn read_state(&self) -> anyhow::Result<CalibrationStatus> {
         let calibration = self.peripheral.read(&self.calibration).await?;
         Ok(postcard::from_bytes(&calibration)?)
     }

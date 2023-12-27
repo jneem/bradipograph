@@ -6,8 +6,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use bradipous_geom::Config;
-use bradipous_protocol::{Calibration, CalibrationStatus, Cmd, StepperSegment};
+use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
     api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
     platform::{Adapter, Manager, Peripheral},
@@ -16,11 +15,11 @@ use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar};
 use kurbo::{BezPath, Point, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
-use svg::plan;
 
-use crate::connection::Bradipograph;
+use crate::{connection::Bradipograph, simulator::Simulation};
 
 mod connection;
+mod simulator;
 mod svg;
 
 const TICK: Duration = Duration::from_millis(50);
@@ -50,29 +49,6 @@ where
 
 type Result<T> = std::result::Result<T, Error>;
 
-fn mv(config: &bradipous_geom::Config, from: Point, to: Point) -> Vec<Cmd> {
-    let from_steps = config.point_to_steps(&from);
-    let to_steps = config.point_to_steps(&to);
-    if from_steps == to_steps {
-        return vec![];
-    }
-    let right_steps = to_steps.right as i32 - from_steps.right as i32;
-    let left_steps = to_steps.left as i32 - from_steps.left as i32;
-    let seg = StepperSegment {
-        left_steps,
-        right_steps,
-        start_steps_per_sec: 34,
-        end_steps_per_sec: 34,
-        steps_per_sec_per_sec: MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC,
-    };
-    eprintln!("move from {from} to {to}, {seg:?}");
-    if let Some((accel, decel)) = seg.split(MAX_STEPS_PER_SEC as u16) {
-        vec![Cmd::Segment(accel), Cmd::Segment(decel)]
-    } else {
-        vec![Cmd::Segment(seg)]
-    }
-}
-
 async fn connect(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
     let progress = MultiProgress::new();
     let mut bar = progress.add(ProgressBar::new_spinner().with_message("Searching..."));
@@ -90,6 +66,20 @@ async fn connect(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
     Ok(peripheral)
 }
 
+fn make_simulation(state: &bradipous_protocol::State) -> Simulation {
+    let config = state.geom();
+    eprintln!("Calibration {state:?}");
+
+    Simulation {
+        geom: config,
+        max_steps_per_sec: MAX_STEPS_PER_SEC as u16,
+        max_steps_per_sec_per_sec: MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC,
+        pen_down: false, // TODO: make the bradipo report this too
+        position: state.position,
+        steps_per_sec: 0,
+    }
+}
+
 async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let peripheral = connect(adapter).await?;
     let brad = Bradipograph::new(peripheral).await?;
@@ -97,25 +87,23 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let bar = ProgressBar::new_spinner().with_message("Checking calibration...");
     bar.enable_steady_tick(TICK);
 
-    let mut calibration = brad.read_calibration().await?;
+    let mut calibration = brad.read_state().await?;
     bar.finish_with_message("received!");
 
     while matches!(calibration, CalibrationStatus::Uncalibrated) {
         eprintln!("Uncalibrated");
-        command_mode(&brad).await?;
-        calibration = brad.read_calibration().await?;
+        command_mode(&brad, None).await?;
+        calibration = brad.read_state().await?;
     }
-    let CalibrationStatus::Calibrated(calib, pos) = calibration else {
+    let CalibrationStatus::Calibrated(state) = calibration else {
         unreachable!();
     };
-    let config = Config::from(calib);
-    let init_pos = config.steps_to_point(&pos);
-    eprintln!("Calibration {config:?}, steps {pos:?}, pos {init_pos:?}");
+    let simulation = make_simulation(&state);
 
     if let Some(path) = &args.path {
         // When sending a file, quit on error (otherwise we keep trying to send it
         // on reconnection).
-        match send_file(&brad, &config, init_pos, path).await {
+        match send_file(&brad, simulation, path).await {
             Err(Error::Err(e)) => {
                 eprintln!("Sending the file failed with error {e}");
                 Err(Error::Exit)
@@ -123,21 +111,16 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
             x => x,
         }
     } else {
-        command_mode(&brad).await
+        command_mode(&brad, Some(simulation)).await
     }
 }
 
-async fn send_file(
-    brad: &Bradipograph,
-    config: &bradipous_geom::Config,
-    initial_position: Point,
-    path: &Path,
-) -> Result<()> {
+async fn send_file(brad: &Bradipograph, mut simulation: Simulation, path: &Path) -> Result<()> {
     let mut p = svg::load_svg(path)?;
 
-    svg::transform(&mut p, config);
+    svg::transform(&mut p, &simulation.geom);
 
-    let cmds = plan(&p, &initial_position, config)?;
+    let cmds = simulation.draw_path(&p, 0.05);
     dbg!(&cmds);
     let chunks = cmds.chunks(32);
 
@@ -151,14 +134,10 @@ async fn send_file(
     Ok(())
 }
 
-async fn draw_box(
-    brad: &Bradipograph,
-    config: &bradipous_geom::Config,
-    initial_position: Point,
-) -> Result<()> {
-    let bbox = config.draw_box();
+async fn draw_box(brad: &Bradipograph, simulation: &mut Simulation) -> Result<()> {
+    let bbox = simulation.geom.draw_box();
     let path: BezPath = bbox.path_elements(0.01).collect();
-    let cmds = plan(&path, &initial_position, config)?;
+    let cmds = simulation.draw_path(&path, 0.05);
     dbg!(&cmds);
     for cmd in cmds {
         brad.send_cmd_and_wait(cmd).await?;
@@ -197,7 +176,7 @@ fn read_number(reed: &mut Reedline, prompt: &str) -> Result<Option<f32>> {
     }
 }
 
-async fn command_mode(brad: &Bradipograph) -> Result<()> {
+async fn command_mode(brad: &Bradipograph, mut simulation: Option<Simulation>) -> Result<()> {
     let mut reed = Reedline::create();
     let prompt = string_prompt("");
     loop {
@@ -215,21 +194,16 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
             let Some(y) = read_number(&mut reed, "y")? else {
                 continue;
             };
-            // FIXME: this is not the right way to get the current position,
-            // because there could be other move commands in the queue.
-            let calib = brad.read_calibration().await?;
-            let CalibrationStatus::Calibrated(calib, steps) = calib else {
-                eprintln!("Cannot move, you must calibrate first");
+            let Some(sim) = simulation.as_mut() else {
+                eprintln!("Cannot draw square, you must calibrate first");
                 continue;
             };
-            let config = Config::from(calib);
-            let init_pos = config.steps_to_point(&steps);
             let pos = Point::new(x.into(), y.into());
-            for cmd in mv(&config, init_pos, pos) {
+            for cmd in sim.move_to(pos) {
                 brad.send_cmd(cmd).await?;
             }
         } else if s == "query" {
-            let calib = brad.read_calibration().await?;
+            let calib = brad.read_state().await?;
             eprintln!("calibration: {calib:?}");
         } else if s == "calibrate" {
             let Some(d) = read_number(&mut reed, "How far apart (in cm) are the two claws? ")?
@@ -256,16 +230,40 @@ async fn command_mode(brad: &Bradipograph) -> Result<()> {
                 right_arm_cm: right,
             }))
             .await?;
+            let calib = brad.read_state().await?;
+            let CalibrationStatus::Calibrated(state) = calib else {
+                eprintln!("Calibration failed?? Try again, I guess...");
+                continue;
+            };
+            simulation = Some(make_simulation(&state));
         } else if s == "square" {
-            let calib = brad.read_calibration().await?;
-
-            let CalibrationStatus::Calibrated(calib, steps) = calib else {
+            let Some(sim) = simulation.as_mut() else {
                 eprintln!("Cannot draw square, you must calibrate first");
                 continue;
             };
-            let config = Config::from(calib);
-            let init_pos = config.steps_to_point(&steps);
-            draw_box(brad, &config, init_pos).await?;
+            draw_box(brad, sim).await?;
+        } else if s == "min-angle" {
+            let Some(deg) = read_number(&mut reed, "degrees")? else {
+                continue;
+            };
+            brad.send_cmd_and_wait(Cmd::SetMinAngleDegrees(deg)).await?;
+            let calib = brad.read_state().await?;
+            let CalibrationStatus::Calibrated(state) = calib else {
+                eprintln!("Calibration failed?? Try again, I guess...");
+                continue;
+            };
+            simulation = Some(make_simulation(&state));
+        } else if s == "max-hang" {
+            let Some(hang) = read_number(&mut reed, "cm")? else {
+                continue;
+            };
+            brad.send_cmd_and_wait(Cmd::SetMaxHang(hang)).await?;
+            let calib = brad.read_state().await?;
+            let CalibrationStatus::Calibrated(state) = calib else {
+                eprintln!("Calibration failed?? Try again, I guess...");
+                continue;
+            };
+            simulation = Some(make_simulation(&state));
         } else {
             eprintln!("unknown command");
         }
