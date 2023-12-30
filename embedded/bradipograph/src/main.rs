@@ -116,11 +116,16 @@ impl GlobalState {
 fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, StepperPositions) {
     let radius = 1.4;
 
-    let config = ConfigBuilder::default()
-        .with_claw_distance(calib.claw_distance_cm as f64)
-        .with_spool_radius(radius)
-        .with_max_hang(30.0)
-        .build();
+    let config = if let Some(mut prev_config) = global.config() {
+        prev_config.claw_distance = calib.claw_distance_cm.into();
+        prev_config
+    } else {
+        ConfigBuilder::default()
+            .with_claw_distance(calib.claw_distance_cm.into())
+            .with_spool_radius(radius)
+            .with_max_hang(30.0)
+            .build()
+    };
 
     let arm_lengths = ArmLengths {
         left: calib.left_arm_cm as f64,
