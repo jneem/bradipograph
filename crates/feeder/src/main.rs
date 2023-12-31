@@ -11,7 +11,7 @@ use btleplug::{
     api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
     platform::{Adapter, Manager, Peripheral},
 };
-use clap::Parser;
+use clap::{builder::ValueParser, CommandFactory, FromArgMatches, Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar};
 use kurbo::{BezPath, Point, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
@@ -29,7 +29,155 @@ const MAX_VELOCITY_PER_SEC: u32 = 2;
 
 #[derive(Parser)]
 struct Args {
-    path: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Calibrate the bradipograph from scratch
+    Calibrate {
+        /// distance (in cm) between the two claws
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        claw_distance: f64,
+        /// length (in cm) of the left arm
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        left: f64,
+        /// length (in cm) of the right arm
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        right: f64,
+    },
+
+    /// Re-calibrate just the arm lengths
+    SetArmLengths {
+        /// length (in cm) of the left arm
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        left: f64,
+        /// length (in cm) of the right arm
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        right: f64,
+    },
+
+    /// Set the maximum vertical hang
+    SetMaxHang {
+        /// maximum distance (in cm) that we can hang below the claws
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        hang: f64,
+    },
+
+    /// Set the minimum hanging angle
+    SetMinAngle {
+        /// minimum angle (in degrees)
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        angle: f64,
+    },
+
+    /// Move to a coordinate
+    Move {
+        /// `x` coordinate (in cm), with zero being exactly between the two claws
+        #[arg(value_parser = ValueParser::new(sane_signed_f64))]
+        x: f64,
+        /// `y` coordinate (in cm), with zero being the highest drawable position,
+        /// and positive values being lower.
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        y: f64,
+    },
+
+    /// Draw an SVG file
+    Svg {
+        /// path to the svg input
+        path: PathBuf,
+    },
+
+    /// Draw a square showing the drawable region
+    Square,
+
+    /// Query the current bradipograph status
+    Query,
+}
+
+async fn reload_simulation(brad: &Bradipograph) -> Result<Simulation> {
+    match brad.read_state().await? {
+        CalibrationStatus::Uncalibrated => Err(anyhow!("Calibration mysteriously failed").into()),
+        CalibrationStatus::Calibrated(state) => Ok(make_simulation(&state)),
+    }
+}
+
+async fn calibrate(brad: &Bradipograph, calib: Calibration) -> Result<Simulation> {
+    brad.send_cmd_and_wait(Cmd::Calibrate(calib)).await?;
+    reload_simulation(brad).await
+}
+
+impl Command {
+    async fn execute(
+        &self,
+        brad: &Bradipograph,
+        simulation: &mut Option<Simulation>,
+    ) -> Result<()> {
+        match self {
+            Command::Calibrate {
+                claw_distance,
+                left,
+                right,
+            } => {
+                let calib = Calibration {
+                    claw_distance_cm: *claw_distance as f32,
+                    left_arm_cm: *left as f32,
+                    right_arm_cm: *right as f32,
+                };
+                *simulation = Some(calibrate(brad, calib).await?);
+            }
+            Command::SetArmLengths { left, right } => match brad.read_state().await? {
+                CalibrationStatus::Uncalibrated => {
+                    return Err(anyhow!("set-arm-lengths requires calibration").into())
+                }
+                CalibrationStatus::Calibrated(state) => {
+                    let calib = Calibration {
+                        claw_distance_cm: state.claw_distance,
+                        left_arm_cm: *left as f32,
+                        right_arm_cm: *right as f32,
+                    };
+                    *simulation = Some(calibrate(brad, calib).await?);
+                }
+            },
+            Command::SetMaxHang { hang } => {
+                brad.send_cmd_and_wait(Cmd::SetMaxHang(*hang as f32))
+                    .await?;
+                *simulation = Some(reload_simulation(brad).await?);
+            }
+            Command::SetMinAngle { angle } => {
+                brad.send_cmd_and_wait(Cmd::SetMinAngleDegrees(*angle as f32))
+                    .await?;
+                *simulation = Some(reload_simulation(brad).await?);
+            }
+            Command::Move { x, y } => {
+                let Some(sim) = simulation.as_mut() else {
+                    return Err(anyhow!("move requires calibration").into());
+                };
+                let pos = Point::new(*x, *y);
+                for cmd in sim.move_to(pos) {
+                    brad.send_cmd(cmd).await?;
+                }
+            }
+            Command::Svg { path } => {
+                let Some(sim) = simulation.as_mut() else {
+                    return Err(anyhow!("svg requires calibration").into());
+                };
+                send_file(brad, sim, path).await?;
+            }
+            Command::Square => {
+                let Some(sim) = simulation.as_mut() else {
+                    return Err(anyhow!("square requires calibration").into());
+                };
+                draw_box(brad, sim).await?;
+            }
+            Command::Query => {
+                let calib = brad.read_state().await?;
+                eprintln!("calibration: {calib:?}");
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -45,6 +193,32 @@ where
     fn from(e: E) -> Self {
         Error::Err(e.into())
     }
+}
+
+// A clap ValueParser for f64s that are non-negative and not insanely large.
+fn sane_f64(s: &str) -> std::result::Result<f64, clap::Error> {
+    s.parse::<f64>()
+        .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+        .and_then(|x| {
+            if (0.0..=10_000.0).contains(&x) {
+                Ok(x)
+            } else {
+                Err(clap::Error::new(clap::error::ErrorKind::InvalidValue))
+            }
+        })
+}
+
+// TODO: DRY
+fn sane_signed_f64(s: &str) -> std::result::Result<f64, clap::Error> {
+    s.parse::<f64>()
+        .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+        .and_then(|x| {
+            if (-10_000.0..=10_000.0).contains(&x) {
+                Ok(x)
+            } else {
+                Err(clap::Error::new(clap::error::ErrorKind::InvalidValue))
+            }
+        })
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -87,41 +261,27 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     let bar = ProgressBar::new_spinner().with_message("Checking calibration...");
     bar.enable_steady_tick(TICK);
 
-    let mut calibration = brad.read_state().await?;
+    let calibration = brad.read_state().await?;
     bar.finish_with_message("received!");
 
-    while matches!(calibration, CalibrationStatus::Uncalibrated) {
-        eprintln!("Uncalibrated");
-        command_mode(&brad, None).await?;
-        calibration = brad.read_state().await?;
-    }
-    let CalibrationStatus::Calibrated(state) = calibration else {
-        unreachable!();
+    let mut simulation = match calibration {
+        CalibrationStatus::Uncalibrated => None,
+        CalibrationStatus::Calibrated(state) => Some(make_simulation(&state)),
     };
-    let simulation = make_simulation(&state);
 
-    if let Some(path) = &args.path {
-        // When sending a file, quit on error (otherwise we keep trying to send it
-        // on reconnection).
-        match send_file(&brad, simulation, path).await {
-            Err(Error::Err(e)) => {
-                eprintln!("Sending the file failed with error {e}");
-                Err(Error::Exit)
-            }
-            x => x,
-        }
+    if let Some(cmd) = args.command.as_ref() {
+        cmd.execute(&brad, &mut simulation).await
     } else {
-        command_mode(&brad, Some(simulation)).await
+        command_mode(&brad, simulation).await
     }
 }
 
-async fn send_file(brad: &Bradipograph, mut simulation: Simulation, path: &Path) -> Result<()> {
+async fn send_file(brad: &Bradipograph, simulation: &mut Simulation, path: &Path) -> Result<()> {
     let mut p = svg::load_svg(path)?;
 
     svg::transform(&mut p, &simulation.geom);
 
     let cmds = simulation.draw_path(&p, 0.05);
-    dbg!(&cmds);
     let chunks = cmds.chunks(32);
 
     for chunk in chunks {
@@ -138,7 +298,6 @@ async fn draw_box(brad: &Bradipograph, simulation: &mut Simulation) -> Result<()
     let bbox = simulation.geom.draw_box();
     let path: BezPath = bbox.path_elements(0.01).collect();
     let cmds = simulation.draw_path(&path, 0.05);
-    dbg!(&cmds);
     for cmd in cmds {
         brad.send_cmd_and_wait(cmd).await?;
     }
@@ -153,26 +312,19 @@ fn string_prompt(s: &str) -> DefaultPrompt {
     )
 }
 
-fn read_cmd(reed: &mut Reedline, prompt: &dyn Prompt) -> Result<String> {
+fn read_cmd(reed: &mut Reedline, prompt: &dyn Prompt) -> Result<Command> {
     let s = reed.read_line(prompt)?;
     match s {
-        reedline::Signal::Success(s) => Ok(s),
-        reedline::Signal::CtrlC | reedline::Signal::CtrlD => Err(Error::Exit),
-    }
-}
-
-fn read_number(reed: &mut Reedline, prompt: &str) -> Result<Option<f32>> {
-    loop {
-        let s = read_cmd(reed, &string_prompt(prompt))?;
-        if s == "q" {
-            return Ok(None);
-        }
-        match s.parse::<f32>() {
-            Ok(x) => return Ok(Some(x)),
-            Err(_) => {
-                eprintln!("That isn't a number; try again, or enter 'q' to go back")
+        reedline::Signal::Success(s) => {
+            if s.trim() == "quit" || s.trim() == "q" {
+                return Err(Error::Exit);
             }
+            let matches = <Args as CommandFactory>::command()
+                .no_binary_name(true)
+                .try_get_matches_from(s.split_whitespace())?;
+            Ok(<Command as FromArgMatches>::from_arg_matches(&matches)?)
         }
+        reedline::Signal::CtrlC | reedline::Signal::CtrlD => Err(Error::Exit),
     }
 }
 
@@ -180,92 +332,25 @@ async fn command_mode(brad: &Bradipograph, mut simulation: Option<Simulation>) -
     let mut reed = Reedline::create();
     let prompt = string_prompt("");
     loop {
-        let s = read_cmd(&mut reed, &prompt)?;
-        let s = s.trim();
-
-        if s == "quit" {
-            return Err(Error::Exit);
-        } else if s == "continue" {
-            return Ok(());
-        } else if s == "move" {
-            let Some(x) = read_number(&mut reed, "x")? else {
+        let cmd = match read_cmd(&mut reed, &prompt) {
+            Ok(c) => c,
+            Err(Error::Err(e)) => {
+                eprintln!("{e}");
                 continue;
-            };
-            let Some(y) = read_number(&mut reed, "y")? else {
-                continue;
-            };
-            let Some(sim) = simulation.as_mut() else {
-                eprintln!("Cannot draw square, you must calibrate first");
-                continue;
-            };
-            let pos = Point::new(x.into(), y.into());
-            for cmd in sim.move_to(pos) {
-                brad.send_cmd(cmd).await?;
             }
-        } else if s == "query" {
-            let calib = brad.read_state().await?;
-            eprintln!("calibration: {calib:?}");
-        } else if s == "calibrate" {
-            let Some(d) = read_number(&mut reed, "How far apart (in cm) are the two claws? ")?
-            else {
-                continue;
-            };
-            let Some(left) = read_number(
-                &mut reed,
-                "How far apart (in cm) is the head from the left claw? ",
-            )?
-            else {
-                continue;
-            };
-            let Some(right) = read_number(
-                &mut reed,
-                "How far apart (in cm) is the head from the right claw? ",
-            )?
-            else {
-                continue;
-            };
-            brad.send_cmd_and_wait(Cmd::Calibrate(Calibration {
-                claw_distance_cm: d,
-                left_arm_cm: left,
-                right_arm_cm: right,
-            }))
-            .await?;
-            let calib = brad.read_state().await?;
-            let CalibrationStatus::Calibrated(state) = calib else {
-                eprintln!("Calibration failed?? Try again, I guess...");
-                continue;
-            };
-            simulation = Some(make_simulation(&state));
-        } else if s == "square" {
-            let Some(sim) = simulation.as_mut() else {
-                eprintln!("Cannot draw square, you must calibrate first");
-                continue;
-            };
-            draw_box(brad, sim).await?;
-        } else if s == "min-angle" {
-            let Some(deg) = read_number(&mut reed, "degrees")? else {
-                continue;
-            };
-            brad.send_cmd_and_wait(Cmd::SetMinAngleDegrees(deg)).await?;
-            let calib = brad.read_state().await?;
-            let CalibrationStatus::Calibrated(state) = calib else {
-                eprintln!("Calibration failed?? Try again, I guess...");
-                continue;
-            };
-            simulation = Some(make_simulation(&state));
-        } else if s == "max-hang" {
-            let Some(hang) = read_number(&mut reed, "cm")? else {
-                continue;
-            };
-            brad.send_cmd_and_wait(Cmd::SetMaxHang(hang)).await?;
-            let calib = brad.read_state().await?;
-            let CalibrationStatus::Calibrated(state) = calib else {
-                eprintln!("Calibration failed?? Try again, I guess...");
-                continue;
-            };
-            simulation = Some(make_simulation(&state));
-        } else {
-            eprintln!("unknown command");
+            Err(Error::Exit) => {
+                return Ok(());
+            }
+        };
+
+        match cmd.execute(brad, &mut simulation).await {
+            Ok(_) => {}
+            Err(Error::Err(e)) => {
+                eprintln!("error: {e}");
+            }
+            Err(Error::Exit) => {
+                return Ok(());
+            }
         }
     }
 }
