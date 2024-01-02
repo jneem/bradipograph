@@ -1,3 +1,13 @@
+//! Basic geometry of the bradipograph, including conversion from Cartesian
+//! coordinates to arm lengths and stepper steps.
+//!
+//! We call the marker location the "head," and the two bits of string are
+//! the "arms," which go from the head to the two "claws."
+//!
+//! This crate supports `no_std` and uses `libm` to allow for running in
+//! embedded contexts. (It does use floating point, however, and so it will
+//! be slow on the esp32-c3.)
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::f64::consts::PI;
@@ -37,21 +47,29 @@ impl Angle {
     }
 }
 
+/// Lengths of the arms, from the head to the claws.
+///
+/// Left and right are measured from the point of view of the person
+/// looking at the bradipograph.
+///
+/// Measured in centimeters.
 #[derive(Debug)]
 pub struct ArmLengths {
     pub left: f64,
     pub right: f64,
 }
 
+/// Angles of the rotors (the things that the string winds around).
+///
+/// A zero angle corresponds to an arm length of zero, and positive
+/// angles correspond to longer arms. Since the arms will always have
+/// positive length, the angles will always be positive also.
+///
+/// The "left" rotor is the one attached to the left arm, even though
+/// it's actually the rotor on the right.
 pub struct RotorAngles {
     pub left: Angle,
     pub right: Angle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StepperPositions {
-    pub left: u32,
-    pub right: u32,
 }
 
 impl RotorAngles {
@@ -63,7 +81,16 @@ impl RotorAngles {
     }
 }
 
-// TODO: might be fun to add some typestate to make sure things are initialized properly...
+/// The position of the stepper motors, measured in number of steps.
+///
+/// A zero value corresponds to an arm length of zero, and increasing
+/// values correspond to longer arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StepperPositions {
+    pub left: u32,
+    pub right: u32,
+}
+
 pub struct ConfigBuilder {
     min_angle: Angle,
     max_hang: f64,
@@ -125,12 +152,29 @@ impl ConfigBuilder {
     }
 }
 
+/// The geometric configuration of a bradipograph.
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
+    /// The horizontal distance between claws, in centimeters. (We assume
+    /// that the claws are aligned vertically.)
     pub claw_distance: f64,
+    /// The radius of the spools that the string winds around.
     pub spool_radius: f64,
+    /// The bradipous can't lift itself all the way up to its claws, because
+    /// there would be too much tension on the arms. The min angle controls
+    /// how high it can get: when dangling directly below the left claw, measure
+    /// the angle between the right arm and a horizontal line. This angle
+    /// is not allowed to be smaller than `min_angle`.
+    ///
+    /// In particular, a min angle of zero would mean that the head can come
+    /// all the way up to the claws. 10 to 15 degrees seems to be a reasonable
+    /// value. If the stepper motors are struggling near the top of the picture,
+    /// increase the min angle.
     pub min_angle: Angle,
+    /// How far below the claws is the head allowed to hang?
     pub max_hang: f64,
+    /// How many stepper motor steps does it take for the spools to make
+    /// one revolution?
     pub steps_per_revolution: f64,
 
     // Our smallest hang, determined by min_angle and claw_distance. We
