@@ -19,5 +19,5 @@ kurbo = { workspace = true, features = ["std"] }
 postcard = { version = "1.0.8", features = ["alloc"] }
 reedline = "0.26.0"
 tokio = { version = "1.35.0", features = ["macros", "rt-multi-thread", "sync"] }
-usvg = "0.36.0"
+usvg = "0.37.0"
 uuid = "1.6.1"

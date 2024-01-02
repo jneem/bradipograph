@@ -3,16 +3,14 @@ use std::path::Path;
 use kurbo::{Affine, BezPath, Rect, Shape};
 use usvg::{tiny_skia_path::PathSegment, TreeParsing};
 
-pub fn transform(path: &mut BezPath, config: &bradipous_geom::Config) {
+pub fn transform(path: &mut BezPath, target_rect: &Rect) {
     let bbox = path.bounding_box();
 
-    let w = config.claw_distance - 20.0;
-    let target_bbox = Rect::new(-w / 2.0, 0.0, w / 2.0, config.max_hang);
-    let scale = (target_bbox.height() / bbox.height()).min(target_bbox.width() / bbox.width());
+    let scale = (target_rect.height() / bbox.height()).min(target_rect.width() / bbox.width());
 
     let transform = Affine::translate(-bbox.center().to_vec2())
         .then_scale(scale)
-        .then_translate(target_bbox.center().to_vec2());
+        .then_translate(target_rect.center().to_vec2());
 
     path.apply_affine(transform);
 }
@@ -29,25 +27,26 @@ pub fn load_svg(path: &Path) -> anyhow::Result<BezPath> {
     for node in tree.root.descendants() {
         let mut bez = BezPath::new();
         if let usvg::NodeKind::Path(p) = &*node.borrow() {
-            for seg in p.data.segments() {
+            let transform = match &*node.parent().unwrap().borrow() {
+                usvg::NodeKind::Group(b) => b.abs_transform,
+                _ => {
+                    eprintln!("Hm. Expected a path to have a group as its parent");
+                    usvg::Transform::identity()
+                }
+            };
+            let path = p.data.as_ref().clone().transform(transform).unwrap();
+            for seg in path.segments() {
                 match seg {
-                    PathSegment::MoveTo(mut pt) => {
-                        p.transform.map_point(&mut pt);
+                    PathSegment::MoveTo(pt) => {
                         bez.move_to(cvt(pt));
                     }
-                    PathSegment::LineTo(mut pt) => {
-                        p.transform.map_point(&mut pt);
+                    PathSegment::LineTo(pt) => {
                         bez.line_to(cvt(pt));
                     }
-                    PathSegment::QuadTo(mut pt1, mut pt2) => {
-                        p.transform.map_point(&mut pt1);
-                        p.transform.map_point(&mut pt2);
+                    PathSegment::QuadTo(pt1, pt2) => {
                         bez.quad_to(cvt(pt1), cvt(pt2));
                     }
-                    PathSegment::CubicTo(mut pt1, mut pt2, mut pt3) => {
-                        p.transform.map_point(&mut pt1);
-                        p.transform.map_point(&mut pt2);
-                        p.transform.map_point(&mut pt3);
+                    PathSegment::CubicTo(pt1, pt2, pt3) => {
                         bez.curve_to(cvt(pt1), cvt(pt2), cvt(pt3));
                     }
                     PathSegment::Close => bez.close_path(),

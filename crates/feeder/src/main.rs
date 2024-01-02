@@ -13,7 +13,7 @@ use btleplug::{
 };
 use clap::{builder::ValueParser, CommandFactory, FromArgMatches, Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar};
-use kurbo::{BezPath, Point, Shape as _};
+use kurbo::{BezPath, Point, Rect, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
 
 use crate::{connection::Bradipograph, simulator::Simulation};
@@ -87,6 +87,14 @@ enum Command {
     Svg {
         /// path to the svg input
         path: PathBuf,
+
+        /// scale the output to this width (in cm)
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        width: Option<f64>,
+
+        /// scale the output to this width (in cm)
+        #[arg(value_parser = ValueParser::new(sane_f64))]
+        height: Option<f64>,
     },
 
     /// Draw a square showing the drawable region
@@ -159,11 +167,30 @@ impl Command {
                     brad.send_cmd(cmd).await?;
                 }
             }
-            Command::Svg { path } => {
+            Command::Svg {
+                path,
+                width,
+                height,
+            } => {
                 let Some(sim) = simulation.as_mut() else {
                     return Err(anyhow!("svg requires calibration").into());
                 };
-                send_file(brad, sim, path).await?;
+                let mut rect = sim.geom.draw_box();
+                if let Some(width) = width {
+                    if *width < rect.width() {
+                        rect.x0 = -width / 2.0;
+                        rect.x1 = width / 2.0;
+                    }
+                }
+                if let Some(height) = height {
+                    if *height < rect.height() {
+                        let center = rect.center().y;
+                        rect.y0 = center - height / 2.0;
+                        rect.y1 = center + height / 2.0;
+                    }
+                }
+
+                send_file(brad, sim, path, rect).await?;
             }
             Command::Square => {
                 let Some(sim) = simulation.as_mut() else {
@@ -276,10 +303,15 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     }
 }
 
-async fn send_file(brad: &Bradipograph, simulation: &mut Simulation, path: &Path) -> Result<()> {
+async fn send_file(
+    brad: &Bradipograph,
+    simulation: &mut Simulation,
+    path: &Path,
+    target_rect: Rect,
+) -> Result<()> {
     let mut p = svg::load_svg(path)?;
 
-    svg::transform(&mut p, &simulation.geom);
+    svg::transform(&mut p, &target_rect);
 
     let cmds = simulation.draw_path(&p, 0.05);
     let chunks = cmds.chunks(32);

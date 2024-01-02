@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use kurbo::{PathSeg, Vec2};
+use kurbo::{PathSeg, Point, Vec2};
 
 pub struct SmoothParts<I: Iterator> {
     segments: Peekable<I>,
@@ -16,6 +16,7 @@ impl<I: Iterator<Item = PathSeg>> SmoothParts<I> {
 
 pub struct SmoothPart<'a, I: Iterator> {
     last_tangent: Option<Vec2>,
+    last_point: Option<Point>,
     segments: &'a mut Peekable<I>,
 }
 
@@ -23,6 +24,7 @@ impl<I: Iterator<Item = PathSeg>> SmoothParts<I> {
     pub fn next_part(&mut self) -> Option<SmoothPart<'_, I>> {
         self.segments.peek().is_some().then_some(SmoothPart {
             last_tangent: None,
+            last_point: None,
             segments: &mut self.segments,
         })
     }
@@ -37,11 +39,17 @@ impl<'a, I: Iterator<Item = PathSeg>> Iterator for SmoothPart<'a, I> {
         let ret = self.segments.peek()?;
         if let Some(prev_tangent) = self.last_tangent {
             let mut is_corner = false;
-            let start_tangent = match ret {
-                PathSeg::Line(l) => l.p1 - l.p0,
-                PathSeg::Quad(q) => q.p1 - q.p0,
-                PathSeg::Cubic(c) => c.p1 - c.p0,
+            let (start_tangent, start_point) = match ret {
+                PathSeg::Line(l) => (l.p1 - l.p0, l.p0),
+                PathSeg::Quad(q) => (q.p1 - q.p0, q.p0),
+                PathSeg::Cubic(c) => (c.p1 - c.p0, c.p0),
             };
+
+            if let Some(prev_pt) = self.last_point {
+                if start_point != prev_pt {
+                    is_corner = true;
+                }
+            }
 
             // If one of the tangents is close to zero, say that they aren't parallel. This
             // might be a false positive, but it saves us from having to consider the next
@@ -61,11 +69,13 @@ impl<'a, I: Iterator<Item = PathSeg>> Iterator for SmoothPart<'a, I> {
             }
         }
 
-        self.last_tangent = Some(match ret {
-            PathSeg::Line(l) => l.p1 - l.p0,
-            PathSeg::Quad(q) => q.p2 - q.p1,
-            PathSeg::Cubic(c) => c.p3 - c.p2,
-        });
+        let (t, p) = match ret {
+            PathSeg::Line(l) => (l.p1 - l.p0, l.p1),
+            PathSeg::Quad(q) => (q.p2 - q.p1, q.p2),
+            PathSeg::Cubic(c) => (c.p3 - c.p2, c.p3),
+        };
+        self.last_tangent = Some(t);
+        self.last_point = Some(p);
         self.segments.next()
     }
 }
@@ -91,5 +101,25 @@ mod tests {
 
         let p3 = parts.next_part().unwrap().collect::<Vec<_>>();
         assert_eq!(p3, vec![PathSeg::Line(Line::new((0., 10.), (0., 0.)))]);
+
+        assert!(parts.next_part().is_none());
+    }
+
+    #[test]
+    fn discontinuity() {
+        let mut p = BezPath::new();
+        p.move_to((0., 0.));
+        p.line_to((1., 0.));
+        p.move_to((0., 1.));
+        p.line_to((1., 1.));
+
+        let mut parts = SmoothParts::new(p.segments());
+        let p0 = parts.next_part().unwrap().collect::<Vec<_>>();
+        assert_eq!(p0, vec![PathSeg::Line(Line::new((0., 0.), (1., 0.)))]);
+
+        let p1 = parts.next_part().unwrap().collect::<Vec<_>>();
+        assert_eq!(p1, vec![PathSeg::Line(Line::new((0., 1.), (1., 1.)))]);
+
+        assert!(parts.next_part().is_none());
     }
 }
