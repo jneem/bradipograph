@@ -1,0 +1,6 @@
+[book]
+authors = ["Joe Neeman"]
+language = "en"
+multilingual = false
+src = "src"
+title = "The Bradipograph Book"

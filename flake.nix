@@ -33,6 +33,7 @@
             cmake
             freetype
             dbus
+            mdbook
             rust-toolchain
             python-toolchain
             cargo-espflash

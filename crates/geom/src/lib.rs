@@ -7,6 +7,9 @@
 //! This crate supports `no_std` and uses `libm` to allow for running in
 //! embedded contexts. (It does use floating point, however, and so it will
 //! be slow on the esp32-c3.)
+//!
+//! It might be nice to use a "units" crate. uom seems to be the most mature,
+//! but it doesn't support using libm in place of std.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
