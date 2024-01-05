@@ -1,21 +1,24 @@
-EyeCenter = [34, -8];
-EyeInnerRadius = 11;
-EyeRadius = 17;
-NoseRadius = 70;
-HeadRadius = 60;
+EyeCenter = [40, -20];
 StrokeWidth = 5;
-HeadTranslation = -30;
+EyeInnerRadius = 11;
+EyeRadius = 17 + StrokeWidth / 2;
+NoseAboveEyeCenter = -5;
+HeadRadius = 70;
+StrokeHeight = 8;
+HeadTranslation = -45;
 ChinTranslation = -38;
+StringHeight = 6;
 StringDiameter = 0.3;
+StringCutoutAngle = 10;
 
 StepperScrewDistance = 35;
 StepperScrewOffset = 8;
-StepperScrewAngle = 30;
+StepperScrewAngle = 22.5;
 
 // Stepper driver
 DriverWidth = 31.4;
 DriverHeight = 35.4;
-DriverPosition = [21.5, -65];
+DriverPosition = [33, -80];
 DriverScrewPositions = [
     DriverPosition + [2.54, 2.54],
     DriverPosition + [DriverWidth, 0] - [2.54, -2.54],
@@ -30,7 +33,15 @@ ScrewLocations = [
     [-50.4, 2.5],
 ];
 
-use <bradi-wheel.scad>;
+NoseArcXOffset = sqrt(4 * EyeRadius^2 - (EyeRadius - NoseAboveEyeCenter)^2);
+NoseArcYOffset = EyeRadius - NoseAboveEyeCenter;
+NoseArcCenter = EyeCenter - [NoseArcXOffset, NoseArcYOffset];
+NoseArcAngle = atan2(NoseArcYOffset, NoseArcXOffset);
+
+BrowRadius = ((EyeCenter[1] - StrokeWidth/2)^2 + EyeCenter[0]^2 - EyeRadius^2) / (2 * (- EyeCenter[1] + StrokeWidth/2 - EyeRadius));
+BrowAngle = atan2(EyeCenter[0], BrowRadius - (-EyeCenter[1] - StrokeWidth/2));
+
+use <wheel.scad>;
 
 $fn=60;
 
@@ -46,11 +57,11 @@ stringDetachPoint = function(r) [s(r) * cos(theta(r) - phi), -s(r) * sin(theta(r
 
 
 module strokeCircle(radius, startAngle, endAngle, strokeWidth) {
-    step = 0.999;
+    step = 0.299;
     points = [for (t = [startAngle:step:(endAngle-0.001)]) [radius * cos(t), radius * sin(t)]];
         
     offset(r=strokeWidth/2)
-    polygon(cat(points, rev(0.999 * points)));
+    polygon(cat(points, rev(0.99999 * points)));
 }
 
 module ScrewSupport(h) {
@@ -64,19 +75,9 @@ module LooseScrewHole() {
 }
 
 
-module Mouth() {
-    translate([0, HeadRadius * 0.3]) {
-        linear_extrude(StrokeWidth)
-        strokeCircle(HeadRadius * 1.1, 254, 286, StrokeWidth);
-    }
-}
-
 module EyeSocket() {
-    difference() {
-        linear_extrude(StrokeWidth)
-        mirror([1, 0]) strokeCircle(EyeRadius + StrokeWidth/2, 170, 310, StrokeWidth);
-        
-    }
+        linear_extrude(StrokeHeight)
+        strokeCircle(EyeRadius, 180 + NoseArcAngle, 360 + 90 - BrowAngle, StrokeWidth);
 }
 
 module StepperMount() {
@@ -91,6 +92,10 @@ module RightEye() {
         //Wheel();
         EyeSocket();
     }
+    translate(NoseArcCenter) {
+        linear_extrude(StrokeHeight)
+        strokeCircle(EyeRadius, NoseArcAngle, 90, StrokeWidth);
+    }
 }
 
 module Forehead2d() {
@@ -103,8 +108,8 @@ module Forehead2d() {
             square([500, 500]);
         }
         
-        translate(EyeCenter) circle(EyeRadius);
-        mirror([1, 0, 0]) translate(EyeCenter) circle(EyeRadius);
+        translate(EyeCenter) circle(EyeRadius - StrokeWidth / 2);
+        mirror([1, 0, 0]) translate(EyeCenter) circle(EyeRadius - StrokeWidth / 2);
 
     }
 }
@@ -112,14 +117,18 @@ module Forehead2d() {
 module Head() {
     difference() {
         union() {
+            
+        linear_extrude(StrokeHeight)
+        translate([0, -BrowRadius+StrokeWidth/2])
+        strokeCircle(BrowRadius, 90 - BrowAngle - 0.5, 90 + BrowAngle + 0.5, StrokeWidth);
             difference() {
                 union() {
-                    linear_extrude(StrokeWidth)
+                    linear_extrude(StrokeHeight)
                     Forehead2d();
             
                     // Head outline
                     translate([0, HeadTranslation]) {
-                        linear_extrude(StrokeWidth)
+                        linear_extrude(StrokeHeight)
                         intersection() {
                             strokeCircle(HeadRadius, 0, 360, StrokeWidth);
                             
@@ -127,14 +136,17 @@ module Head() {
                             square([200, 200], center = true);
                         }
                         
-                        linear_extrude(StrokeWidth)
-                        translate([0, ChinTranslation])
-                        offset(r=StrokeWidth/2)
-                        square([90, 0.01], center = true);
+                        linear_extrude(StrokeHeight)
+
+                        intersection() {
+                            translate([0, ChinTranslation])
+                            square([2 * HeadRadius, StrokeWidth], center = true);
+                            circle(HeadRadius + StrokeWidth / 2);
+                        }
                     }
                 }
         
-                translate([0, 0, StrokeWidth / 2]) linear_extrude(StrokeWidth) offset(0.1) Forehead2d();
+                translate([0, 0, StrokeHeight / 2]) linear_extrude(StrokeHeight) offset(0.1) Forehead2d();
             }
             for (p=ScrewLocations) {
                 translate(p) ScrewSupport(StrokeWidth/2 + 1);
@@ -168,14 +180,8 @@ module Forehead() {
 
 
 module RightStringGuide() {
-    eps = 0.15;
-    hull() {
-        translate([StringDiameter/2 + eps, eps, 0]) cylinder(h=StrokeWidth, r=eps);
-        translate([14, eps, 0]) cylinder(h=StrokeWidth, r=eps);
-        translate([14, 5.0, 0]) cylinder(h=StrokeWidth, r=eps);
-    }
-    
-    h = StrokeWidth / 2 - StringDiameter;
+    eps = 0.15;    
+    h = StrokeHeight - StringHeight - StringDiameter;
 
     module Guide() {
         hull() {
@@ -186,7 +192,7 @@ module RightStringGuide() {
         }
     }
     
-    translate([0, 0, StrokeWidth]) Guide();
+    translate([0, 0, StrokeHeight]) Guide();
     
 
 }
@@ -196,35 +202,49 @@ module StringGuide() {
 mirror([1, 0, 0]) RightStringGuide();
 }
 
+module RightStringCutout() {
+    eps = 0.15;    
+    translate([0, StrokeWidth/2 - 0.01, StrokeHeight + StringHeight])
+    cube([StringDiameter + eps, StrokeWidth, 2*StrokeHeight], center = true);
+    
+    translate([0, eps, StringHeight])
+    linear_extrude(StrokeHeight)
+    polygon([[0, 0], [0, StrokeWidth * 1.1], [StrokeWidth * 1.1 / tan(StringCutoutAngle), StrokeWidth * 1.1]]);
+
+}
+
+module StringCutout() {
+    RightStringCutout();
+    mirror([1, 0, 0]) RightStringCutout();
+}
+
 module Nose() {
     module Plank() {
+        translate([0, StrokeWidth / 2])
         intersection() {
             rotate([108.5, 0, 0]) translate([0, 20, 0.75]) {
-                cube([25, 40, 1.5], center = true);
+                cube([15, 40, 1.5], center = true);
             }
             translate([0, 0, 50]) cube([100, 100, 100], center = true);
         }
     }
     
-    translate([0, -17, 0]) {
+    translate([0, EyeRadius + NoseArcCenter[1]]) {
         Plank();
         
         difference() {
             union() {
                 // Bridge connecting the nose to the eyes
-                linear_extrude(StrokeWidth)
-                translate([0, -NoseRadius - StrokeWidth/2, 0])
-                //offset(r=StrokeWidth/2)
-                //square([42, 0.01], center=true);
-                strokeCircle(NoseRadius, 72.2, 107.8, StrokeWidth);
+                linear_extrude(StrokeHeight)
+                square([NoseArcCenter[0] * 2, StrokeWidth], center=true);
                 
                 // Cylinder supporting the nose
-                translate([0, -11, 0]) cylinder(50, r=StrokeWidth/2);
+                translate([0, -8, 0]) cylinder(50, r=StrokeWidth/2);
         
-                // Bridge connecting the nose to the mouth
-                bridge = 28;
+                // Bridge connecting the nose to the cylinder
+                bridge = 8;
         
-                linear_extrude(StrokeWidth)
+                linear_extrude(StrokeHeight)
                 offset(r=StrokeWidth/2)
                 translate([0, - bridge / 2])
                 square([0.01, bridge], center=true);
@@ -245,10 +265,10 @@ module Nose() {
 module DriverScrewSupports() {
     module Right() {
         for(p=DriverScrewPositions) {
-            translate(p) ScrewSupport(StrokeWidth);
+            translate(p) ScrewSupport(StrokeHeight);
         }
         
-        linear_extrude(StrokeWidth)
+        linear_extrude(StrokeHeight)
         offset(r=StrokeWidth/2)
         translate(DriverScrewPositions[0] + [0, -2.5])
         square([0.01, 5], center = true);
@@ -278,16 +298,17 @@ mirror([1, 0, 0]) RightEye();
 
 Head();
 Nose();
-Mouth();
     StringGuide();
     
     DriverScrewSupports();
+    //StringCutout();
 };
 
 module Negative() {
     translate(EyeCenter) StepperMount();
     mirror([1, 0, 0]) translate(EyeCenter) StepperMount();
     DriverScrewHoles();
+    StringCutout();
     
     // Extra screw hole at the bottom, maybe for a battery?
     translate([0, ChinTranslation + HeadTranslation]) TightScrewHole();
@@ -304,6 +325,6 @@ difference() {
 
 translate([120, 0, StrokeWidth/2 + 1]) Forehead();
 
-//translate([20, -65, -1]) cube([31.4, 35.4, 1]);
+translate(DriverPosition) cube([31.4, 35.4, 1]);
 
 

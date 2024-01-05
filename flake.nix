@@ -38,6 +38,7 @@
             python-toolchain
             cargo-espflash
             cargo-outdated
+            openscad
             taplo
             wireshark
           ];
