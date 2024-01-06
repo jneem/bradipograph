@@ -1,0 +1,18 @@
+[package]
+name = "sketcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { version = "1.0.79", features = ["backtrace"] }
+geo = { version = "0.27.0", default-features = false }
+geo-booleanop = { git = "https://github.com/21re/rust-geo-booleanop" }
+geo-types = "0.7"
+kurbo = { workspace = true, features = ["std"] }
+num-traits = "0.2.17"
+usvg = "0.37.0"
+
+[dev-dependencies]
+clap = { version = "4.4.13", features = ["derive"] }
+piet = "0.6.2"
+piet-svg = "0.6.2"

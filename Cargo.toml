@@ -3,10 +3,10 @@
 resolver = "2"
 members = [ 
   "crates/feeder",
-  "crates/feeder",
   "crates/geom",
   "crates/planner",
   "crates/protocol",
+  "crates/sketcher",
 ]
 
 exclude = [ "embedded/bradipograph" ]
