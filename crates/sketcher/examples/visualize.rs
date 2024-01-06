@@ -1,9 +1,9 @@
 use anyhow::anyhow;
 use bradipous_sketcher::Zigzag;
-use bradipous_sketcher::{clip_path, load_svg, transform};
+use bradipous_sketcher::{load_svg, transform};
 use clap::value_parser;
 use clap::Parser as _;
-use kurbo::{BezPath, Shape as _};
+use kurbo::{ParamCurve as _, Shape as _};
 use piet::{Color, RenderContext as _};
 use std::{path::PathBuf, str::FromStr};
 
@@ -38,12 +38,6 @@ struct Args {
     output: PathBuf,
 }
 
-fn extrema(xs: impl Iterator<Item = f64> + Clone) -> (f64, f64) {
-    let max = xs.clone().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
-    let min = xs.clone().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
-    (min, max)
-}
-
 pub fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
@@ -59,40 +53,56 @@ pub fn main() -> anyhow::Result<()> {
     } else {
         kurbo::Circle::new((0.0, 0.0), 100.0).into_path(0.01)
     };
-    //let clip = kurbo::Rect::new(-60.0, -80.0, 70.0, 80.0).into_path(0.01);
-    //let zz_box = kurbo::Rect::new(-80.0, -80.0, 80.0, 80.0);
-    let zz_box = clip.bounding_box();
-    let mut zigzag = Zigzag::default().points(&zz_box).into_iter();
-    let mut zigzag_path = BezPath::new();
-    zigzag_path.move_to(zigzag.next().unwrap());
-    for p in zigzag {
-        zigzag_path.line_to(p);
-    }
+    let orig_bbox = clip.bounding_box().inset(1.0);
+    let transform = kurbo::TranslateScale::translate((-orig_bbox.x0, -orig_bbox.y0));
+    let bbox = transform * orig_bbox;
+    let clip = transform * clip;
 
-    let poly = bradipous_sketcher::to_polygon(&clip, 0.1);
-    let clipped = clip_path(&zigzag_path, &poly, 0.1);
+    let polys = bradipous_sketcher::to_polygons(&clip, 0.1);
+    let clipped = Zigzag::default().clipped_to(&clip);
 
-    let points: Vec<_> = clipped.iter().flat_map(|lines| lines.points()).collect();
-    let (x_min, x_max) = extrema(points.iter().map(|p| p.x()));
-    let (y_min, y_max) = extrema(points.iter().map(|p| p.y()));
+    let points: Vec<_> = clipped
+        .iter()
+        .flat_map(|path| path.segments().map(|seg| seg.eval(0.0)))
+        .collect();
 
-    let mut piet = piet_svg::RenderContext::new(piet::kurbo::Size::new(
-        x_max - x_min + 2.0,
-        y_max - y_min + 2.0,
-    ));
+    let mut piet = piet_svg::RenderContext::new(piet::kurbo::Size {
+        width: bbox.width(),
+        height: bbox.height(),
+    });
 
-    let pt = |p: &geo_types::Point<f64>| {
-        piet::kurbo::Point::new(p.x() - x_min + 1.0, p.y() - y_min + 1.0)
-    };
+    let pt = |p: &kurbo::Point| piet::kurbo::Point::new(p.x, p.y);
     for p in &points {
         let p = pt(p);
         piet.fill(piet::kurbo::Circle::new(p, 0.2), &Color::BLUE);
     }
-    for line in clipped.iter().flat_map(|lines| lines.lines()) {
-        let p0 = pt(&line.start.into());
-        let p1 = pt(&line.end.into());
-        let line = piet::kurbo::Line::new(p0, p1);
-        piet.stroke(line, &Color::BLACK, 0.05);
+    for p in &clipped {
+        for line in p.segments() {
+            let kurbo::PathSeg::Line(line) = line else {
+                panic!("expected a polyline");
+            };
+            let line = piet::kurbo::Line::new((line.p0.x, line.p0.y), (line.p1.x, line.p1.y));
+            piet.stroke(line, &Color::BLACK, 0.05);
+        }
+    }
+
+    let poly_colors = [
+        Color::PURPLE,
+        Color::RED,
+        Color::BLUE,
+        Color::GREEN,
+        Color::FUCHSIA,
+    ]
+    .into_iter()
+    .cycle();
+    let pt = |p: &geo_types::Coord| piet::kurbo::Point::new(p.x, p.y);
+    for (poly, color) in polys.0.iter().zip(poly_colors) {
+        for line in poly.exterior().lines() {
+            let p0 = pt(&line.start);
+            let p1 = pt(&line.end);
+            let line = piet::kurbo::Line::new(p0, p1);
+            piet.stroke(line, &color, 0.15);
+        }
     }
 
     piet.finish().unwrap();

@@ -1,12 +1,18 @@
 use std::path::Path;
 
-use geo::{coordinate_position::CoordPos, dimensions::Dimensions, Relate as _};
+use geo::{
+    coordinate_position::CoordPos, dimensions::Dimensions, BoundingRect as _, EuclideanDistance,
+    Relate as _,
+};
 use geo_booleanop::boolean::{sweep_event::SweepEvent, BoundingBox, Operation};
-use geo_types::{Coord, LineString, Polygon};
+use geo_types::{Coord, LineString, MultiPolygon, Polygon};
 use kurbo::{Affine, BezPath, Point, Rect, Shape};
 use usvg::{tiny_skia_path::PathSegment, TreeParsing};
 
 mod connect_edges;
+mod decompose;
+
+pub use decompose::decompose;
 
 pub fn transform(path: &mut BezPath, target_rect: &Rect) {
     let bbox = path.bounding_box();
@@ -51,19 +57,19 @@ pub fn to_polylines(path: &BezPath, tolerance: f64) -> Vec<LineString<f64>> {
     polylines
 }
 
-pub fn to_polygon(path: &BezPath, tolerance: f64) -> Polygon<f64> {
+pub fn to_polygons(path: &BezPath, tolerance: f64) -> MultiPolygon<f64> {
     // Note that Polygon is supposed to satisfy a bunch of properties, and we aren't testing any of them.
     // This causes a panic with the Tweag logo.
     // We should have some routines for, e.g., splitting a path into simple loops.
-    let mut polylines = to_polylines(path, tolerance).into_iter();
-    if let Some(first) = polylines.next() {
-        Polygon::new(first, polylines.collect())
-    } else {
-        panic!("empty!")
-    }
+    let polylines = to_polylines(path, tolerance);
+    decompose(&polylines)
 }
 
-pub fn clip_polyline(polyline: &LineString<f64>, poly: &Polygon<f64>) -> Vec<LineString<f64>> {
+pub fn clip_polyline(
+    polyline: &LineString<f64>,
+    poly: &Polygon<f64>,
+    join_threshold: f64,
+) -> Vec<LineString<f64>> {
     let mut sbbox = BoundingBox {
         min: Coord {
             x: std::f64::INFINITY,
@@ -99,9 +105,7 @@ pub fn clip_polyline(polyline: &LineString<f64>, poly: &Polygon<f64>) -> Vec<Lin
         Operation::Intersection,
     );
 
-    //dbg!(&sorted_events);
     let contours = connect_edges::connect_edges_to_events(&sorted_events);
-    dbg!(contours.len());
 
     fn both_subject(ev: &SweepEvent<f64>) -> bool {
         ev.is_subject && ev.get_other_event().map_or(false, |o| o.is_subject)
@@ -120,14 +124,12 @@ pub fn clip_polyline(polyline: &LineString<f64>, poly: &Polygon<f64>) -> Vec<Lin
             continue;
         };
         let last_end = cur.last().unwrap();
-        let next_start = &next[first_on_line];
+        let next_start = next[first_on_line].point;
 
-        let join = geo_types::Line::new(*last_end, next_start.point);
+        let join = geo_types::Line::new(*last_end, next_start);
         let next_points = next.into_iter().map(|ev| ev.point);
-        if poly
-            .relate(&join)
-            .get(CoordPos::Outside, CoordPos::OnBoundary)
-            == Dimensions::Empty
+        if poly.relate(&join).get(CoordPos::Outside, CoordPos::Inside) == Dimensions::Empty
+            && last_end.euclidean_distance(&next_start) <= join_threshold
         {
             cur.extend(next_points);
         } else {
@@ -142,12 +144,17 @@ pub fn clip_polyline(polyline: &LineString<f64>, poly: &Polygon<f64>) -> Vec<Lin
     ret
 }
 
-pub fn clip_path(path: &BezPath, poly: &Polygon<f64>, tolerance: f64) -> Vec<LineString<f64>> {
+pub fn clip_path(
+    path: &BezPath,
+    poly: &Polygon<f64>,
+    tolerance: f64,
+    join_threshold: f64,
+) -> Vec<LineString<f64>> {
     let lines = to_polylines(path, tolerance);
 
     lines
         .into_iter()
-        .flat_map(|line| clip_polyline(&line, poly))
+        .flat_map(|line| clip_polyline(&line, poly, join_threshold))
         .collect()
 }
 
@@ -158,6 +165,14 @@ pub fn line_string_to_path(lines: &LineString<f64>) -> BezPath {
             .lines()
             .map(|line| kurbo::PathSeg::Line(kurbo::Line::new(pt(&line.start), pt(&line.end)))),
     )
+}
+
+fn to_kurbo_pt(pt: &Coord) -> kurbo::Point {
+    kurbo::Point::new(pt.x, pt.y)
+}
+
+fn to_kurbo_line(line: &geo::Line) -> kurbo::Line {
+    kurbo::Line::new(to_kurbo_pt(&line.start), to_kurbo_pt(&line.end))
 }
 
 pub struct Zigzag {
@@ -225,6 +240,43 @@ impl Zigzag {
                     )
             })
             .collect()
+    }
+
+    pub fn clipped_to(&self, path: &BezPath) -> Vec<BezPath> {
+        let tolerance = (self.row_height.min((self.zig + self.zag).abs())) / 8.0;
+        let tolerance = tolerance.max(0.01);
+        let polys = to_polygons(path, tolerance);
+        polys
+            .0
+            .iter()
+            .map(|poly| {
+                let zz_box = poly.bounding_rect().unwrap();
+                let zz_box = kurbo::Rect::new(
+                    zz_box.min().x,
+                    zz_box.min().y,
+                    zz_box.max().x,
+                    zz_box.max().y,
+                );
+                let mut points = self.points(&zz_box).into_iter();
+                let mut zigzag_path = BezPath::new();
+                zigzag_path.move_to(points.next().unwrap());
+                for p in points {
+                    zigzag_path.line_to(p);
+                }
+                let clipped = clip_path(
+                    &zigzag_path,
+                    poly,
+                    0.1,
+                    self.row_height + self.zig.abs().max(self.zag.abs()),
+                );
+                kurbo::BezPath::from_path_segments(
+                    clipped
+                        .iter()
+                        .flat_map(|lines| lines.lines())
+                        .map(|line| kurbo::PathSeg::Line(to_kurbo_line(&line))),
+                )
+            })
+            .collect::<Vec<_>>()
     }
 
     fn row(&self, y: f64, x_start: f64, x_end: f64) -> Vec<Point> {

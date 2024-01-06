@@ -333,24 +333,10 @@ async fn send_file(
     send_path(brad, simulation, &p).await?;
 
     if fill {
-        let mut zigzag = bradipous_sketcher::Zigzag::default()
-            .points(&target_rect)
-            .into_iter();
-        let mut zigzag_path = BezPath::new();
-        zigzag_path.move_to(zigzag.next().unwrap());
-        for p in zigzag {
-            zigzag_path.line_to(p);
-        }
-        let poly = bradipous_sketcher::to_polygon(&p, 0.1);
-        let clipped = bradipous_sketcher::clip_path(&zigzag_path, &poly, 0.1);
+        let zigzag = bradipous_sketcher::Zigzag::default().clipped_to(&p);
 
-        for lines in clipped {
-            send_path(
-                brad,
-                simulation,
-                &bradipous_sketcher::line_string_to_path(&lines),
-            )
-            .await?;
+        for lines in zigzag {
+            send_path(brad, simulation, &lines).await?;
         }
     }
 
