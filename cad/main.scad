@@ -18,20 +18,18 @@ StepperScrewAngle = 22.5;
 // Stepper driver
 DriverWidth = 31.4;
 DriverHeight = 35.4;
-DriverPosition = [33, -80];
+DriverPosition = [33.15, -80];
 DriverScrewPositions = [
     DriverPosition + [2.54, 2.54],
     DriverPosition + [DriverWidth, 0] - [2.54, -2.54],
 ];
 
-ScrewLocations = [
+ForeheadScrewLocations = [
     [0, HeadRadius + HeadTranslation],
-    [0, HeadRadius + HeadTranslation - 17],
-    [17, 2.5],
-    [-17, 2.5],
-    [50.4, 2.5],
-    [-50.4, 2.5],
+    [50, 4],
+    [-50, 4],
 ];
+ExtraServoScrew = [0, HeadRadius + HeadTranslation - 17];
 
 NoseArcXOffset = sqrt(4 * EyeRadius^2 - (EyeRadius - NoseAboveEyeCenter)^2);
 NoseArcYOffset = EyeRadius - NoseAboveEyeCenter;
@@ -99,22 +97,17 @@ module RightEye() {
 }
 
 module Forehead2d() {
-    difference() {
         intersection() {
             translate([0, HeadTranslation])
-            circle(HeadRadius + StrokeWidth / 2);
-        
-            translate([-250, 0])
-            square([500, 500]);
+            strokeCircle(HeadRadius, 0, 360, StrokeWidth);
+            translate([-250, 0]) square([500, 500]);
         }
         
-        translate(EyeCenter) circle(EyeRadius - StrokeWidth / 2);
-        mirror([1, 0, 0]) translate(EyeCenter) circle(EyeRadius - StrokeWidth / 2);
 
-    }
 }
 
 module Head() {
+    Screws = concat(ForeheadScrewLocations, [ExtraServoScrew]);
     difference() {
         union() {
             
@@ -123,8 +116,12 @@ module Head() {
         strokeCircle(BrowRadius, 90 - BrowAngle - 0.5, 90 + BrowAngle + 0.5, StrokeWidth);
             difference() {
                 union() {
-                    linear_extrude(StrokeHeight)
-                    Forehead2d();
+                    // Line in the middle of the forehead
+                    length = HeadRadius + HeadTranslation - StrokeWidth;
+                    linear_extrude(StringHeight)
+                    offset(StrokeWidth/2)
+                    translate([0, length / 2 + StrokeWidth/2])
+                    square([0.001, length], center = true);
             
                     // Head outline
                     translate([0, HeadTranslation]) {
@@ -146,14 +143,14 @@ module Head() {
                     }
                 }
         
-                translate([0, 0, StrokeHeight / 2]) linear_extrude(StrokeHeight) offset(0.1) Forehead2d();
+                translate([0, 0, StringHeight]) linear_extrude(StrokeHeight) offset(0.1) Forehead2d();
             }
-            for (p=ScrewLocations) {
-                translate(p) ScrewSupport(StrokeWidth/2 + 1);
+            for (p=ForeheadScrewLocations) {
+                translate(p) ScrewSupport(StringHeight + StringDiameter);
             }
         }
         
-        for (p=ScrewLocations) {
+        for (p=Screws) {
             translate(p) TightScrewHole();
         }
     }
@@ -163,12 +160,12 @@ module Forehead() {
     difference() {
         union() {
             linear_extrude(StrokeWidth / 2 - 1) Forehead2d();
-            for(p=ScrewLocations) {
+            for(p=ForeheadScrewLocations) {
                 translate(p) ScrewSupport(StrokeWidth/2 - 1);
             }
         }
         
-        for(p=ScrewLocations) {
+        for(p=ForeheadScrewLocations) {
             translate(p) TightScrewHole();
         }
         translate([0, 0.05, -1]) StringGuide();
@@ -205,9 +202,9 @@ mirror([1, 0, 0]) RightStringGuide();
 module RightStringCutout() {
     eps = 0.15;    
     translate([0, StrokeWidth/2 - 0.01, StrokeHeight + StringHeight])
-    cube([StringDiameter + eps, StrokeWidth, 2*StrokeHeight], center = true);
+    cube([StringDiameter, StrokeWidth, 2*StrokeHeight], center = true);
     
-    translate([0, eps, StringHeight])
+    translate([0, 3*eps, StringHeight])
     linear_extrude(StrokeHeight)
     polygon([[0, 0], [0, StrokeWidth * 1.1], [StrokeWidth * 1.1 / tan(StringCutoutAngle), StrokeWidth * 1.1]]);
 
@@ -223,7 +220,12 @@ module Nose() {
         translate([0, StrokeWidth / 2])
         intersection() {
             rotate([108.5, 0, 0]) translate([0, 20, 0.75]) {
-                cube([15, 40, 1.5], center = true);
+                difference() {
+                    cube([15, 40, 2], center = true);
+                    translate([0, -8]) TightScrewHole();
+                    translate([0, 16]) TightScrewHole();
+
+                }
             }
             translate([0, 0, 50]) cube([100, 100, 100], center = true);
         }
@@ -238,11 +240,12 @@ module Nose() {
                 linear_extrude(StrokeHeight)
                 square([NoseArcCenter[0] * 2, StrokeWidth], center=true);
                 
+                bridge = 7;
                 // Cylinder supporting the nose
-                translate([0, -8, 0]) cylinder(50, r=StrokeWidth/2);
+                translate([0, -bridge, 0]) cylinder(50, r=StrokeWidth/2);
         
                 // Bridge connecting the nose to the cylinder
-                bridge = 8;
+
         
                 linear_extrude(StrokeHeight)
                 offset(r=StrokeWidth/2)
@@ -312,10 +315,6 @@ module Negative() {
     
     // Extra screw hole at the bottom, maybe for a battery?
     translate([0, ChinTranslation + HeadTranslation]) TightScrewHole();
-    
-    for (p=ScrewLocations) {
-        translate(p) TightScrewHole();
-    }
 }
 
 difference() {
@@ -323,8 +322,8 @@ difference() {
     Negative();
 }
 
-translate([120, 0, StrokeWidth/2 + 1]) Forehead();
+translate([160, 0, StrokeWidth/2 + 1]) Forehead();
 
-translate(DriverPosition) cube([31.4, 35.4, 1]);
+//translate(DriverPosition) cube([31.4, 35.4, 1]);
 
 
