@@ -151,6 +151,15 @@ pub fn clip_path(path: &BezPath, poly: &Polygon<f64>, tolerance: f64) -> Vec<Lin
         .collect()
 }
 
+pub fn line_string_to_path(lines: &LineString<f64>) -> BezPath {
+    let pt = |coord: &Coord<f64>| kurbo::Point::new(coord.x, coord.y);
+    BezPath::from_path_segments(
+        lines
+            .lines()
+            .map(|line| kurbo::PathSeg::Line(kurbo::Line::new(pt(&line.start), pt(&line.end)))),
+    )
+}
+
 pub struct Zigzag {
     pub row_height: f64,
     pub row_gap: f64,

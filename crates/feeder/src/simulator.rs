@@ -32,8 +32,12 @@ impl Simulation {
             steps_per_sec_per_sec: self.max_steps_per_sec_per_sec,
         };
         if let Some((accel, decel)) = seg.split(self.max_steps_per_sec) {
-            cmds.push(Cmd::Segment(accel));
-            cmds.push(Cmd::Segment(decel));
+            if accel.left_steps != 0 || accel.right_steps != 0 {
+                cmds.push(Cmd::Segment(accel));
+            }
+            if decel.left_steps != 0 || decel.right_steps != 0 {
+                cmds.push(Cmd::Segment(decel));
+            }
         } else {
             cmds.push(Cmd::Segment(seg));
         }

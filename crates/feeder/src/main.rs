@@ -95,6 +95,9 @@ enum Command {
         /// scale the output to this width (in cm)
         #[arg(value_parser = ValueParser::new(sane_f64))]
         height: Option<f64>,
+
+        #[arg(long)]
+        fill: bool,
     },
 
     /// Draw a square showing the drawable region
@@ -171,6 +174,7 @@ impl Command {
                 path,
                 width,
                 height,
+                fill,
             } => {
                 let Some(sim) = simulation.as_mut() else {
                     return Err(anyhow!("svg requires calibration").into());
@@ -190,7 +194,7 @@ impl Command {
                     }
                 }
 
-                send_file(brad, sim, path, rect).await?;
+                send_file(brad, sim, path, rect, *fill).await?;
             }
             Command::Square => {
                 let Some(sim) = simulation.as_mut() else {
@@ -303,23 +307,50 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     }
 }
 
-async fn send_file(
-    brad: &Bradipograph,
-    simulation: &mut Simulation,
-    path: &Path,
-    target_rect: Rect,
-) -> Result<()> {
-    let mut p = svg::load_svg(path)?;
-
-    svg::transform(&mut p, &target_rect);
-
-    let cmds = simulation.draw_path(&p, 0.05);
+async fn send_path(brad: &Bradipograph, simulation: &mut Simulation, path: &BezPath) -> Result<()> {
+    let cmds = simulation.draw_path(path, 0.05);
     let chunks = cmds.chunks(32);
 
     for chunk in chunks {
         brad.wait_for_capacity(32).await?;
         for cmd in chunk {
             brad.send_cmd_and_wait(cmd.clone()).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_file(
+    brad: &Bradipograph,
+    simulation: &mut Simulation,
+    path: &Path,
+    target_rect: Rect,
+    fill: bool,
+) -> Result<()> {
+    let mut p = svg::load_svg(path)?;
+
+    svg::transform(&mut p, &target_rect);
+    send_path(brad, simulation, &p).await?;
+
+    if fill {
+        let mut zigzag = bradipous_sketcher::Zigzag::default()
+            .points(&target_rect)
+            .into_iter();
+        let mut zigzag_path = BezPath::new();
+        zigzag_path.move_to(zigzag.next().unwrap());
+        for p in zigzag {
+            zigzag_path.line_to(p);
+        }
+        let poly = bradipous_sketcher::to_polygon(&p, 0.1);
+        let clipped = bradipous_sketcher::clip_path(&zigzag_path, &poly, 0.1);
+
+        for lines in clipped {
+            send_path(
+                brad,
+                simulation,
+                &bradipous_sketcher::line_string_to_path(&lines),
+            )
+            .await?;
         }
     }
 

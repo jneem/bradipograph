@@ -1,10 +1,10 @@
 use anyhow::anyhow;
+use bradipous_sketcher::Zigzag;
+use bradipous_sketcher::{clip_path, load_svg, transform};
 use clap::value_parser;
 use clap::Parser as _;
 use kurbo::{BezPath, Shape as _};
 use piet::{Color, RenderContext as _};
-use sketcher::Zigzag;
-use sketcher::{clip_path, load_svg, transform};
 use std::{path::PathBuf, str::FromStr};
 
 impl FromStr for Scale {
@@ -69,7 +69,7 @@ pub fn main() -> anyhow::Result<()> {
         zigzag_path.line_to(p);
     }
 
-    let poly = sketcher::to_polygon(&clip, 0.1);
+    let poly = bradipous_sketcher::to_polygon(&clip, 0.1);
     let clipped = clip_path(&zigzag_path, &poly, 0.1);
 
     let points: Vec<_> = clipped.iter().flat_map(|lines| lines.points()).collect();

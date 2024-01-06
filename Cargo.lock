@@ -237,6 +237,7 @@ dependencies = [
  "bradipous-geom",
  "bradipous-planner",
  "bradipous-protocol",
+ "bradipous-sketcher",
  "btleplug",
  "clap",
  "crossterm",
@@ -285,6 +286,22 @@ dependencies = [
  "bradipous-geom",
  "proptest",
  "serde",
+]
+
+[[package]]
+name = "bradipous-sketcher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "geo",
+ "geo-booleanop",
+ "geo-types",
+ "kurbo 0.10.4",
+ "num-traits",
+ "piet",
+ "piet-svg",
+ "usvg 0.37.0",
 ]
 
 [[package]]
@@ -1976,22 +1993,6 @@ name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
-
-[[package]]
-name = "sketcher"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "geo",
- "geo-booleanop",
- "geo-types",
- "kurbo 0.10.4",
- "num-traits",
- "piet",
- "piet-svg",
- "usvg 0.37.0",
-]
 
 [[package]]
 name = "slab"
