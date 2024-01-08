@@ -8,7 +8,7 @@ StrokeHeight = 8;
 HeadTranslation = -45;
 ChinTranslation = -38;
 StringHeight = 6;
-StringDiameter = 0.3;
+StringDiameter = 0.4;
 StringCutoutAngle = 10;
 
 StepperScrewDistance = 35;
@@ -204,7 +204,7 @@ module RightStringCutout() {
     translate([0, StrokeWidth/2 - 0.01, StrokeHeight + StringHeight])
     cube([StringDiameter, StrokeWidth, 2*StrokeHeight], center = true);
     
-    translate([0, 3*eps, StringHeight])
+    translate([0, 2*eps, StringHeight])
     linear_extrude(StrokeHeight)
     polygon([[0, 0], [0, StrokeWidth * 1.1], [StrokeWidth * 1.1 / tan(StringCutoutAngle), StrokeWidth * 1.1]]);
 
