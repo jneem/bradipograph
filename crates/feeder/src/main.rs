@@ -8,11 +8,11 @@ use std::{
 use anyhow::anyhow;
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
-    api::{Central as _, Manager as _, Peripheral as _, ScanFilter},
-    platform::{Adapter, Manager, Peripheral},
+    api::{Central as _, Manager as _, ScanFilter},
+    platform::{Adapter, Manager},
 };
 use clap::{builder::ValueParser, CommandFactory, FromArgMatches, Parser, Subcommand};
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::ProgressBar;
 use kurbo::{BezPath, Point, Rect, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
 
@@ -107,14 +107,14 @@ enum Command {
     Query,
 }
 
-async fn reload_simulation(brad: &Bradipograph) -> Result<Simulation> {
+async fn reload_simulation(brad: &mut Bradipograph) -> Result<Simulation> {
     match brad.read_state().await? {
         CalibrationStatus::Uncalibrated => Err(anyhow!("Calibration mysteriously failed").into()),
         CalibrationStatus::Calibrated(state) => Ok(make_simulation(&state)),
     }
 }
 
-async fn calibrate(brad: &Bradipograph, calib: Calibration) -> Result<Simulation> {
+async fn calibrate(brad: &mut Bradipograph, calib: Calibration) -> Result<Simulation> {
     brad.send_cmd_and_wait(Cmd::Calibrate(calib)).await?;
     reload_simulation(brad).await
 }
@@ -122,7 +122,7 @@ async fn calibrate(brad: &Bradipograph, calib: Calibration) -> Result<Simulation
 impl Command {
     async fn execute(
         &self,
-        brad: &Bradipograph,
+        brad: &mut Bradipograph,
         simulation: &mut Option<Simulation>,
     ) -> Result<()> {
         match self {
@@ -254,23 +254,6 @@ fn sane_signed_f64(s: &str) -> std::result::Result<f64, clap::Error> {
 
 type Result<T> = std::result::Result<T, Error>;
 
-async fn connect(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
-    let progress = MultiProgress::new();
-    let mut bar = progress.add(ProgressBar::new_spinner().with_message("Searching..."));
-    bar.enable_steady_tick(TICK);
-
-    let peripheral = connection::find_bradipograph(adapter).await?;
-    bar.finish_with_message("found!");
-    bar = progress.add(ProgressBar::new_spinner().with_message("Connecting..."));
-    bar.enable_steady_tick(TICK);
-
-    peripheral.connect().await?;
-    peripheral.discover_services().await?;
-    bar.finish_with_message("connected!");
-
-    Ok(peripheral)
-}
-
 fn make_simulation(state: &bradipous_protocol::State) -> Simulation {
     let config = state.geom();
     eprintln!("Calibration {state:?}");
@@ -285,9 +268,8 @@ fn make_simulation(state: &bradipous_protocol::State) -> Simulation {
     }
 }
 
-async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
-    let peripheral = connect(adapter).await?;
-    let brad = Bradipograph::new(peripheral).await?;
+async fn handle_connection(adapter: Adapter, args: &Args) -> Result<()> {
+    let mut brad = Bradipograph::new(adapter).await?;
 
     let bar = ProgressBar::new_spinner().with_message("Checking calibration...");
     bar.enable_steady_tick(TICK);
@@ -301,13 +283,17 @@ async fn handle_connection(adapter: &mut Adapter, args: &Args) -> Result<()> {
     };
 
     if let Some(cmd) = args.command.as_ref() {
-        cmd.execute(&brad, &mut simulation).await
+        cmd.execute(&mut brad, &mut simulation).await
     } else {
-        command_mode(&brad, simulation).await
+        command_mode(&mut brad, simulation).await
     }
 }
 
-async fn send_path(brad: &Bradipograph, simulation: &mut Simulation, path: &BezPath) -> Result<()> {
+async fn send_path(
+    brad: &mut Bradipograph,
+    simulation: &mut Simulation,
+    path: &BezPath,
+) -> Result<()> {
     let cmds = simulation.draw_path(path, 0.05);
     let chunks = cmds.chunks(32);
 
@@ -321,7 +307,7 @@ async fn send_path(brad: &Bradipograph, simulation: &mut Simulation, path: &BezP
 }
 
 async fn send_file(
-    brad: &Bradipograph,
+    brad: &mut Bradipograph,
     simulation: &mut Simulation,
     path: &Path,
     target_rect: Rect,
@@ -343,7 +329,7 @@ async fn send_file(
     Ok(())
 }
 
-async fn draw_box(brad: &Bradipograph, simulation: &mut Simulation) -> Result<()> {
+async fn draw_box(brad: &mut Bradipograph, simulation: &mut Simulation) -> Result<()> {
     let bbox = simulation.geom.draw_box();
     let path: BezPath = bbox.path_elements(0.01).collect();
     let cmds = simulation.draw_path(&path, 0.05);
@@ -377,7 +363,7 @@ fn read_cmd(reed: &mut Reedline, prompt: &dyn Prompt) -> Result<Command> {
     }
 }
 
-async fn command_mode(brad: &Bradipograph, mut simulation: Option<Simulation>) -> Result<()> {
+async fn command_mode(brad: &mut Bradipograph, mut simulation: Option<Simulation>) -> Result<()> {
     let mut reed = Reedline::create();
     let prompt = string_prompt("");
     loop {
@@ -409,20 +395,15 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let manager = Manager::new().await?;
-    let mut adapter = manager
+    let adapter = manager
         .adapters()
         .await?
         .into_iter()
         .next()
         .ok_or(anyhow!("no bluetooth adapter"))?;
     adapter.start_scan(ScanFilter::default()).await?;
-    loop {
-        if let Err(Error::Err(e)) = handle_connection(&mut adapter, &args).await {
-            eprintln!("lost connection, restarting (cause: {e})");
-        } else {
-            eprintln!("exiting...");
-            break;
-        }
+    if let Err(Error::Err(_)) = handle_connection(adapter, &args).await {
+        eprintln!("lost connection, exiting...");
     }
 
     Ok(())
