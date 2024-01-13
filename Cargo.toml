@@ -12,4 +12,4 @@ members = [
 exclude = [ "embedded/bradipograph" ]
 
 [workspace.dependencies]
-kurbo = { git = "https://github.com/jneem/kurbo", branch = "no-alloc", default-features = false }
+kurbo = { version = "10.4", default-features = false }
