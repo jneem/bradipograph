@@ -1,7 +1,7 @@
-use bradipous_geom::{Angle, RotorAngles, StepperPositions};
+use bradipous_geom::{Angle, FromKurbo as _, Point, RotorAngles, StepperPositions};
 use bradipous_planner::{MotionCurve, PlannerConfig};
 use bradipous_protocol::{Cmd, StepperSegment};
-use kurbo::{BezPath, ParamCurve as _, PathSeg, Point};
+use kurbo::{BezPath, ParamCurve as _, PathSeg};
 
 pub struct Simulation {
     pub geom: bradipous_geom::Config,
@@ -46,12 +46,15 @@ impl Simulation {
     }
 
     pub fn move_to(&mut self, p: Point) -> Vec<Cmd> {
-        self.move_to_angles(self.geom.rotor_angles(&self.geom.arm_lengths(&p)))
+        self.move_to_angles(
+            self.geom
+                .arm_lengths_to_rotor_angles(&self.geom.point_to_arm_lengths(&p)),
+        )
     }
 
     pub fn move_to_angles(&mut self, angles: RotorAngles) -> Vec<Cmd> {
         let mut ret = Vec::new();
-        let to_steps = self.geom.stepper_steps(&angles);
+        let to_steps = self.geom.rotor_angles_to_stepper_steps(&angles);
 
         if to_steps != self.position && self.pen_down {
             ret.push(Cmd::PenUp);
@@ -63,9 +66,9 @@ impl Simulation {
         ret
     }
 
-    pub fn draw_to_angles(&mut self, angles: RotorAngles, energy: f64) -> Vec<Cmd> {
+    pub fn draw_to_angles(&mut self, angles: RotorAngles, energy: f32) -> Vec<Cmd> {
         let mut ret = Vec::new();
-        let to_steps = self.geom.stepper_steps(&angles);
+        let to_steps = self.geom.rotor_angles_to_stepper_steps(&angles);
 
         // Energy is the square of the velocity, measured in radians per second.
         let end_steps_per_s = (energy.sqrt() * self.steps_per_radian()) as u16;
@@ -79,19 +82,19 @@ impl Simulation {
         ret
     }
 
-    fn steps_per_radian(&self) -> f64 {
-        self.geom.steps_per_revolution / 2.0 * std::f64::consts::PI
+    fn steps_per_radian(&self) -> f32 {
+        self.geom.steps_per_revolution / 2.0 * std::f32::consts::PI
     }
 
-    pub fn draw_path(&mut self, path: &BezPath, accuracy: f64) -> Vec<Cmd> {
+    pub fn draw_path(&mut self, path: &BezPath, accuracy: f32) -> Vec<Cmd> {
         // The planner's coordinates are in radians.
-        let max_rads_per_sec = self.max_steps_per_sec as f64 / self.steps_per_radian();
+        let max_rads_per_sec = self.max_steps_per_sec as f64 / self.steps_per_radian() as f64;
         let max_rads_per_sec_per_sec =
-            self.max_steps_per_sec_per_sec as f64 / self.steps_per_radian();
+            self.max_steps_per_sec_per_sec as f64 / self.steps_per_radian() as f64;
         let planner_config = PlannerConfig {
             max_energy: max_rads_per_sec * max_rads_per_sec,
             max_acceleration: max_rads_per_sec_per_sec,
-            accuracy,
+            accuracy: accuracy as f64,
         };
 
         let mut smooth_parts = bradipous_planner::smoother::SmoothParts::new(path.segments());
@@ -99,16 +102,16 @@ impl Simulation {
         while let Some(part) = smooth_parts.next_part() {
             let part: Vec<PathSeg> = part.collect();
             let draw_start = part[0].eval(0.0);
-            ret.extend(self.move_to(draw_start));
+            ret.extend(self.move_to(Point::from_kurbo(draw_start)));
 
             let plan = MotionCurve::plan_one(&part, &planner_config, &self.geom);
 
             for (angs, energy) in plan.points.iter().zip(&plan.energies) {
                 let angles = RotorAngles {
-                    left: Angle::from_radians(angs.x),
-                    right: Angle::from_radians(angs.y),
+                    left: Angle::radians(angs.x as f32),
+                    right: Angle::radians(angs.y as f32),
                 };
-                ret.extend(self.draw_to_angles(angles, *energy));
+                ret.extend(self.draw_to_angles(angles, *energy as f32));
             }
         }
 

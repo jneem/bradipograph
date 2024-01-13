@@ -4,7 +4,7 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{Angle, ArmLengths, Config, ConfigBuilder, StepperPositions};
+use bradipous_geom::{ArmLengths, Config, ConfigBuilder, LenExt as _, StepperPositions};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -114,25 +114,25 @@ impl GlobalState {
 }
 
 fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, StepperPositions) {
-    let radius = 1.4;
+    let radius = 1.35.cm();
 
     let config = if let Some(mut prev_config) = global.config() {
-        prev_config.claw_distance = calib.claw_distance_cm.into();
+        prev_config.claw_distance = calib.claw_distance;
         prev_config
     } else {
         ConfigBuilder::default()
-            .with_claw_distance(calib.claw_distance_cm.into())
+            .with_claw_distance(calib.claw_distance)
             .with_spool_radius(radius)
-            .with_max_hang(30.0)
+            .with_max_hang(30.0.cm())
             .build()
     };
 
     let arm_lengths = ArmLengths {
-        left: calib.left_arm_cm as f64,
-        right: calib.right_arm_cm as f64,
+        left: calib.left_arm,
+        right: calib.right_arm,
     };
-    let angles = config.rotor_angles(&arm_lengths);
-    let pos = config.stepper_steps(&angles);
+    let angles = config.arm_lengths_to_rotor_angles(&arm_lengths);
+    let pos = config.rotor_angles_to_stepper_steps(&angles);
 
     global.set_config(config);
     global.set_position(pos);
@@ -198,12 +198,12 @@ async fn calibrated_control(
 
                 maybe_steps = Some(pos);
             }
-            Cmd::SetMinAngleDegrees(deg) => {
-                GLOBAL.modify_config(|c| c.min_angle = Angle::from_degrees(deg as f64));
+            Cmd::SetMinAngle(deg) => {
+                GLOBAL.modify_config(|c| c.min_angle = deg);
                 GLOBAL.write_to_flash();
             }
             Cmd::SetMaxHang(h) => {
-                GLOBAL.modify_config(|c| c.max_hang = h as f64);
+                GLOBAL.modify_config(|c| c.max_hang = h);
                 GLOBAL.write_to_flash();
             }
             Cmd::PenUp => {

@@ -13,41 +13,48 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use core::f64::consts::PI;
+use core::f32::consts::PI;
+use libm::{sqrtf, tanf};
 
-#[cfg(feature = "std")]
-use kurbo::Vec2;
+pub type Angle = euclid::Angle<f32>;
+pub type Point = euclid::Point2D<f32, Cm>;
 
-use kurbo::{Point, Rect};
-use libm::{sqrt, tan};
+pub struct Steps;
+pub struct Cm;
 
-fn square(x: f64) -> f64 {
+pub type Len = euclid::Length<f32, Cm>;
+
+fn square<T: core::ops::Mul<T> + Copy>(x: T) -> <T as core::ops::Mul<T>>::Output {
     x * x
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct Angle {
-    radians: f64,
+pub trait LenExt {
+    fn cm(self) -> Len;
 }
 
-impl Angle {
-    pub fn from_degrees(degrees: f64) -> Angle {
-        Angle {
-            radians: degrees * core::f64::consts::PI / 180.0,
-        }
+impl LenExt for f32 {
+    fn cm(self) -> Len {
+        Len::new(self)
     }
+}
 
-    pub fn from_radians(radians: f64) -> Angle {
-        Angle { radians }
-    }
+pub trait FromKurbo {
+    type Input;
+    fn from_kurbo(p: Self::Input) -> Self;
+}
 
-    pub fn radians(&self) -> f64 {
-        self.radians
+#[cfg(feature = "kurbo")]
+impl FromKurbo for Point {
+    type Input = kurbo::Point;
+    fn from_kurbo(p: kurbo::Point) -> Self {
+        Point::new(p.x as f32, p.y as f32)
     }
+}
 
-    pub fn degrees(&self) -> f64 {
-        self.radians * 180.0 / core::f64::consts::PI
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LeftRight<T> {
+    pub left: T,
+    pub right: T,
 }
 
 /// Lengths of the arms, from the head to the claws.
@@ -56,11 +63,7 @@ impl Angle {
 /// looking at the bradipograph.
 ///
 /// Measured in centimeters.
-#[derive(Debug)]
-pub struct ArmLengths {
-    pub left: f64,
-    pub right: f64,
-}
+pub type ArmLengths = LeftRight<Len>;
 
 /// Angles of the rotors (the things that the string winds around).
 ///
@@ -70,16 +73,14 @@ pub struct ArmLengths {
 ///
 /// The "left" rotor is the one attached to the left arm, even though
 /// it's actually the rotor on the right.
-pub struct RotorAngles {
-    pub left: Angle,
-    pub right: Angle,
-}
+pub type RotorAngles = LeftRight<Angle>;
 
 impl RotorAngles {
-    pub fn to_point(&self) -> Point {
-        Point {
-            x: self.left.radians(),
-            y: self.right.radians(),
+    #[cfg(feature = "kurbo")]
+    pub fn to_kurbo_point(&self) -> kurbo::Point {
+        kurbo::Point {
+            x: self.left.get().into(),
+            y: self.right.get().into(),
         }
     }
 }
@@ -88,30 +89,26 @@ impl RotorAngles {
 ///
 /// A zero value corresponds to an arm length of zero, and increasing
 /// values correspond to longer arms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StepperPositions {
-    pub left: u32,
-    pub right: u32,
-}
+pub type StepperPositions = LeftRight<u32>;
 
 pub struct ConfigBuilder {
     min_angle: Angle,
-    max_hang: f64,
-    claw_distance: f64,
-    spool_radius: f64,
-    steps_per_revolution: f64,
-    side_inset: f64,
+    max_hang: Len,
+    claw_distance: Len,
+    spool_radius: Len,
+    steps_per_revolution: f32,
+    side_inset: Len,
 }
 
 impl Default for ConfigBuilder {
     fn default() -> Self {
         Self {
-            min_angle: Angle::from_degrees(10.0),
-            max_hang: 100.0,
-            claw_distance: 100.0,
-            spool_radius: 2.0,
+            min_angle: Angle::degrees(10.0),
+            max_hang: 100.0.cm(),
+            claw_distance: 100.0.cm(),
+            spool_radius: 1.3.cm(),
             steps_per_revolution: 2036.0,
-            side_inset: 10.0,
+            side_inset: 10.0.cm(),
         }
     }
 }
@@ -124,22 +121,22 @@ impl ConfigBuilder {
             min_angle: self.min_angle,
             max_hang: self.max_hang,
             steps_per_revolution: self.steps_per_revolution,
-            hang_offset: self.claw_distance * tan(self.min_angle.radians()),
+            hang_offset: self.claw_distance * tanf(self.min_angle.get()),
             side_inset: self.side_inset,
         }
     }
 
-    pub fn with_max_hang(&mut self, max_hang: f64) -> &mut Self {
+    pub fn with_max_hang(&mut self, max_hang: Len) -> &mut Self {
         self.max_hang = max_hang;
         self
     }
 
-    pub fn with_spool_radius(&mut self, spool_radius: f64) -> &mut Self {
+    pub fn with_spool_radius(&mut self, spool_radius: Len) -> &mut Self {
         self.spool_radius = spool_radius;
         self
     }
 
-    pub fn with_claw_distance(&mut self, claw_distance: f64) -> &mut Self {
+    pub fn with_claw_distance(&mut self, claw_distance: Len) -> &mut Self {
         self.claw_distance = claw_distance;
         self
     }
@@ -149,7 +146,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_steps_per_revolution(&mut self, steps: f64) -> &mut Self {
+    pub fn with_steps_per_revolution(&mut self, steps: f32) -> &mut Self {
         self.steps_per_revolution = steps;
         self
     }
@@ -160,9 +157,9 @@ impl ConfigBuilder {
 pub struct Config {
     /// The horizontal distance between claws, in centimeters. (We assume
     /// that the claws are aligned vertically.)
-    pub claw_distance: f64,
+    pub claw_distance: Len,
     /// The radius of the spools that the string winds around.
-    pub spool_radius: f64,
+    pub spool_radius: Len,
     /// The bradipous can't lift itself all the way up to its claws, because
     /// there would be too much tension on the arms. The min angle controls
     /// how high it can get: when dangling directly below the left claw, measure
@@ -175,127 +172,124 @@ pub struct Config {
     /// increase the min angle.
     pub min_angle: Angle,
     /// How far below the claws is the head allowed to hang?
-    pub max_hang: f64,
+    pub max_hang: Len,
     /// How many stepper motor steps does it take for the spools to make
     /// one revolution?
-    pub steps_per_revolution: f64,
+    pub steps_per_revolution: f32,
 
     // Our smallest hang, determined by min_angle and claw_distance. We
     // offset our publicly-visible coordinates by this amount, so that
     // our (0, 0) coordinate is in the middle of the two claws, hanging
     // below them by `hang_offset`.
-    pub hang_offset: f64,
+    pub hang_offset: Len,
 
     // We can't effectively draw right under the claws. How much horizontal
     // buffer space should we give?
-    pub side_inset: f64,
+    pub side_inset: Len,
 }
 
 impl Config {
-    pub fn arm_lengths(&self, p: &Point) -> ArmLengths {
+    pub fn point_to_arm_lengths(&self, p: &Point) -> ArmLengths {
         let x = p.x;
-        let y = p.y + self.hang_offset;
+        let y = p.y + self.hang_offset.get();
+        let d = self.claw_distance.get();
         ArmLengths {
-            left: sqrt(square(self.claw_distance / 2.0 + x) + square(y)),
-            right: sqrt(square(self.claw_distance / 2.0 - x) + square(y)),
+            left: sqrtf(square(d / 2.0 + x) + square(y)).cm(),
+            right: sqrtf(square(d / 2.0 - x) + square(y)).cm(),
         }
     }
 
-    pub fn spool_circumference(&self) -> f64 {
-        self.spool_radius * 2.0 * core::f64::consts::PI
+    pub fn spool_circumference(&self) -> Len {
+        self.spool_radius * 2.0 * core::f32::consts::PI
     }
 
     pub fn steps_to_point(&self, steps: &StepperPositions) -> Point {
         let angles = RotorAngles {
-            left: Angle::from_radians(
-                f64::from(steps.left) * (2.0 * PI) / self.steps_per_revolution,
-            ),
-            right: Angle::from_radians(
-                f64::from(steps.right) * (2.0 * PI) / self.steps_per_revolution,
-            ),
+            left: Angle::radians(steps.left as f32 * (2.0 * PI) / self.steps_per_revolution),
+            right: Angle::radians(steps.right as f32 * (2.0 * PI) / self.steps_per_revolution),
         };
         let arm_lengths = self.rotor_angles_to_arm_lengths(&angles);
         self.arm_lengths_to_point(&arm_lengths)
     }
 
     pub fn arm_lengths_to_point(&self, lengths: &ArmLengths) -> Point {
-        let x = (square(lengths.left) - square(lengths.right)) / (2.0 * self.claw_distance);
-        let y = sqrt(square(lengths.left) - square(self.claw_distance / 2.0 + x));
-        Point::new(x, y - self.hang_offset)
+        let d = self.claw_distance.get();
+        let l = lengths.left.get();
+        let r = lengths.right.get();
+        let x = (square(l) - square(r)) / (2.0 * d);
+        let y = sqrtf(square(l) - square(d / 2.0 + x));
+        Point::new(x, y - self.hang_offset.get())
     }
 
-    pub fn rotor_angles(&self, lengths: &ArmLengths) -> RotorAngles {
+    pub fn arm_lengths_to_rotor_angles(&self, lengths: &ArmLengths) -> RotorAngles {
         RotorAngles {
-            left: Angle::from_radians(lengths.left / self.spool_radius),
-            right: Angle::from_radians(lengths.right / self.spool_radius),
+            left: Angle::radians((lengths.left / self.spool_radius).get()),
+            right: Angle::radians((lengths.right / self.spool_radius).get()),
         }
     }
 
     pub fn rotor_angles_to_arm_lengths(&self, angles: &RotorAngles) -> ArmLengths {
         ArmLengths {
-            left: angles.left.radians() * self.spool_radius,
-            right: angles.right.radians() * self.spool_radius,
+            left: self.spool_radius * angles.left.get(),
+            right: self.spool_radius * angles.right.get(),
         }
     }
 
-    pub fn stepper_steps(&self, angles: &RotorAngles) -> StepperPositions {
+    pub fn rotor_angles_to_stepper_steps(&self, angles: &RotorAngles) -> StepperPositions {
         StepperPositions {
-            left: libm::round(angles.left.radians() / (2.0 * PI) * self.steps_per_revolution)
-                as u32,
-            right: libm::round(angles.right.radians() / (2.0 * PI) * self.steps_per_revolution)
-                as u32,
+            left: libm::roundf(angles.left.get() / (2.0 * PI) * self.steps_per_revolution) as u32,
+            right: libm::roundf(angles.right.get() / (2.0 * PI) * self.steps_per_revolution) as u32,
         }
     }
 
     pub fn point_to_steps(&self, p: &Point) -> StepperPositions {
-        let arms = self.arm_lengths(p);
-        let angles = self.rotor_angles(&arms);
-        self.stepper_steps(&angles)
+        let arms = self.point_to_arm_lengths(p);
+        let angles = self.arm_lengths_to_rotor_angles(&arms);
+        self.rotor_angles_to_stepper_steps(&angles)
     }
 
-    pub fn draw_box(&self) -> Rect {
-        Rect::new(
-            -self.claw_distance / 2.0 + self.side_inset,
-            0.0,
-            self.claw_distance / 2.0 - self.side_inset,
-            self.max_hang - self.hang_offset,
-        )
+    #[cfg(feature = "kurbo")]
+    pub fn draw_box(&self) -> kurbo::Rect {
+        let w = self.claw_distance.get() as f64 / 2.0 - self.side_inset.get() as f64;
+        let h = self.max_hang.get() as f64 - self.hang_offset.get() as f64;
+        kurbo::Rect::new(-w, 0.0, w, h)
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "kurbo")]
 impl bradipous_planner::Transform for Config {
-    fn f(&self, input: Point) -> Point {
-        self.rotor_angles(&self.arm_lengths(&input)).to_point()
+    fn f(&self, input: kurbo::Point) -> kurbo::Point {
+        self.arm_lengths_to_rotor_angles(&self.point_to_arm_lengths(&Point::from_kurbo(input)))
+            .to_kurbo_point()
     }
 
-    fn df(&self, input: Point, direction: Vec2) -> Vec2 {
-        let Point { x, y } = input;
+    fn df(&self, input: kurbo::Point, direction: kurbo::Vec2) -> kurbo::Vec2 {
+        let kurbo::Point { x, y } = input;
         let f = self.f(input);
-        let d = self.claw_distance / 2.0;
-        let r = self.spool_radius;
-        let h = self.hang_offset;
+        let d = self.claw_distance.get() as f64 / 2.0;
+        let r = self.spool_radius.get() as f64;
+        let h = self.hang_offset.get() as f64;
         let v = direction;
-        Vec2 {
+        kurbo::Vec2 {
             x: (v.x * (x + d) + v.y * (y + h)) / (r * r * f.x),
             y: (v.x * (x - d) + v.y * (y + h)) / (r * r * f.y),
         }
     }
 
-    fn ddf(&self, input: Point, v: Vec2, w: Vec2) -> Vec2 {
-        let Point { x, y } = input;
+    fn ddf(&self, input: kurbo::Point, v: kurbo::Vec2, w: kurbo::Vec2) -> kurbo::Vec2 {
+        let kurbo::Point { x, y } = input;
         let f = self.f(input);
-        let r = self.spool_radius;
-        let r2f2 = Point {
+        let r = self.spool_radius.get() as f64;
+        let r2f2 = kurbo::Point {
             x: square(r) * square(f.x),
             y: square(r) * square(f.y),
         };
-        let r3f3 = Point {
+        let r3f3 = kurbo::Point {
             x: r2f2.x * r * f.x,
             y: r2f2.y * r * f.y,
         };
-        let d = self.claw_distance / 2.0;
-        let h = self.hang_offset;
+        let d = self.claw_distance.get() as f64 / 2.0;
+        let h = self.hang_offset.get() as f64;
 
         let fx_xx = (r2f2.x - square(x + d)) / (r * r3f3.x);
         let fx_yy = (r2f2.x - square(y + h)) / (r * r3f3.x);
@@ -305,14 +299,14 @@ impl bradipous_planner::Transform for Config {
         let fy_yy = (r2f2.y - square(y + h)) / (r * r3f3.y);
         let fy_xy = -(x - d) * (y + h) / (r * r3f3.y);
 
-        Vec2 {
+        kurbo::Vec2 {
             x: fx_xx * v.x * w.x + fx_xy * (v.x * w.y + v.y * w.x) + fx_yy * v.y * w.y,
             y: fy_xx * v.x * w.x + fy_xy * (v.x * w.y + v.y * w.x) + fy_yy * v.y * w.y,
         }
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(all(test, feature = "kurbo"))]
 mod tests {
     use super::*;
     use bradipous_planner::Transform;
@@ -323,15 +317,15 @@ mod tests {
         type Strategy = BoxedStrategy<Config>;
 
         fn arbitrary_with(_: ()) -> Self::Strategy {
-            (1.0..10.0f64, 1.0..10.0f64, 1.0..10.0f64)
+            (1.0..10.0f32, 1.0..10.0f32, 1.0..10.0f32)
                 .prop_map(|(r, d, h)| Config {
-                    claw_distance: d,
-                    spool_radius: r,
-                    min_angle: Angle::from_degrees(10.0),
-                    max_hang: 100.0,
+                    claw_distance: d.cm(),
+                    spool_radius: r.cm(),
+                    min_angle: Angle::degrees(10.0),
+                    max_hang: 100.0.cm(),
                     steps_per_revolution: 2036.0,
-                    hang_offset: h,
-                    side_inset: d / 10.0,
+                    hang_offset: h.cm(),
+                    side_inset: d.cm() / 10.0,
                 })
                 .boxed()
         }
@@ -341,8 +335,8 @@ mod tests {
         // Check that our formula for the gradient is correct by comparing it to the difference quotient.
         #[test]
         fn test_df(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64, vx in -1.0..1.0f64, vy in -1.0..1.0f64) {
-            let p = Point { x, y };
-            let v = Vec2 { x: vx, y: vy };
+            let p = kurbo::Point { x, y };
+            let v = kurbo::Vec2 { x: vx, y: vy };
             let fp = cfg.f(p);
             let dfp = cfg.df(p, v);
 
@@ -356,9 +350,9 @@ mod tests {
         // of the gradient.
         #[test]
         fn test_ddf(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64, vx in -1.0..1.0f64, vy in -1.0..1.0f64, wx in -1.0..1.0f64, wy in -1.0..1.0f64) {
-            let p = Point { x, y };
-            let v = Vec2 { x: vx, y: vy };
-            let w = Vec2 { x: wx, y: wy };
+            let p = kurbo::Point { x, y };
+            let v = kurbo::Vec2 { x: vx, y: vy };
+            let w = kurbo::Vec2 { x: wx, y: wy };
 
             let dfp = cfg.df(p, v);
             let ddfp = cfg.ddf(p, v, w);
@@ -370,20 +364,20 @@ mod tests {
 
         // Check that arm_lengths and arm_lengths_to_point are inverses.
         #[test]
-        fn test_arm_length_inverse(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64) {
-            let p = Point {x,y};
-            let arms = cfg.arm_lengths(&p);
+        fn test_arm_length_inverse(cfg: Config, x in -10.0..10.0f32, y in 1.0..100.0f32) {
+            let p = Point::new(x,y);
+            let arms = cfg.point_to_arm_lengths(&p);
             let q = cfg.arm_lengths_to_point(&arms);
-            assert!((p.x - q.x).abs() < 1e-3);
-            assert!((p.y - q.y).abs() < 1e-3);
+            assert!((p.x - q.x).abs() < 1e-2);
+            assert!((p.y - q.y).abs() < 1e-2);
         }
 
         // Check that point_to_steps and steps_to_point are inverses, more or less. They won't be exact
         // inverses because steps are integer-valued, but after a round-trip to ensure that the point
         // is an integer number of steps then they should be inverses.
         #[test]
-        fn test_point_step_inverse(cfg: Config, x in -10.0..10.0f64, y in 1.0..100.0f64) {
-            let p = Point {x,y};
+        fn test_point_step_inverse(cfg: Config, x in -10.0..10.0f32, y in 1.0..100.0f32) {
+            let p = Point::new(x,y);
             let steps = cfg.point_to_steps(&p);
             let p = cfg.steps_to_point(&steps);
             let steps = cfg.point_to_steps(&p);

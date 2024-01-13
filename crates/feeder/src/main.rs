@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use bradipous_geom::{Angle, LenExt as _, Point};
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
     api::{Central as _, Manager as _, ScanFilter},
@@ -13,7 +14,7 @@ use btleplug::{
 };
 use clap::{builder::ValueParser, CommandFactory, FromArgMatches, Parser, Subcommand};
 use indicatif::ProgressBar;
-use kurbo::{BezPath, Point, Rect, Shape as _};
+use kurbo::{BezPath, Rect, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
 
 use crate::{connection::Bradipograph, simulator::Simulation};
@@ -38,49 +39,49 @@ enum Command {
     /// Calibrate the bradipograph from scratch
     Calibrate {
         /// distance (in cm) between the two claws
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        claw_distance: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        claw_distance: f32,
         /// length (in cm) of the left arm
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        left: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        left: f32,
         /// length (in cm) of the right arm
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        right: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        right: f32,
     },
 
     /// Re-calibrate just the arm lengths
     SetArmLengths {
         /// length (in cm) of the left arm
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        left: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        left: f32,
         /// length (in cm) of the right arm
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        right: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        right: f32,
     },
 
     /// Set the maximum vertical hang
     SetMaxHang {
         /// maximum distance (in cm) that we can hang below the claws
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        hang: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        hang: f32,
     },
 
     /// Set the minimum hanging angle
     SetMinAngle {
         /// minimum angle (in degrees)
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        angle: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        angle: f32,
     },
 
     /// Move to a coordinate
     Move {
         /// `x` coordinate (in cm), with zero being exactly between the two claws
-        #[arg(value_parser = ValueParser::new(sane_signed_f64))]
-        x: f64,
+        #[arg(value_parser = ValueParser::new(sane_signed_f32))]
+        x: f32,
         /// `y` coordinate (in cm), with zero being the highest drawable position,
         /// and positive values being lower.
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        y: f64,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        y: f32,
     },
 
     /// Draw an SVG file
@@ -89,12 +90,12 @@ enum Command {
         path: PathBuf,
 
         /// scale the output to this width (in cm)
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        width: Option<f64>,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        width: Option<f32>,
 
         /// scale the output to this width (in cm)
-        #[arg(value_parser = ValueParser::new(sane_f64))]
-        height: Option<f64>,
+        #[arg(value_parser = ValueParser::new(sane_f32))]
+        height: Option<f32>,
 
         #[arg(long)]
         fill: bool,
@@ -132,9 +133,9 @@ impl Command {
                 right,
             } => {
                 let calib = Calibration {
-                    claw_distance_cm: *claw_distance as f32,
-                    left_arm_cm: *left as f32,
-                    right_arm_cm: *right as f32,
+                    claw_distance: claw_distance.cm(),
+                    left_arm: left.cm(),
+                    right_arm: right.cm(),
                 };
                 *simulation = Some(calibrate(brad, calib).await?);
             }
@@ -144,20 +145,19 @@ impl Command {
                 }
                 CalibrationStatus::Calibrated(state) => {
                     let calib = Calibration {
-                        claw_distance_cm: state.claw_distance,
-                        left_arm_cm: *left as f32,
-                        right_arm_cm: *right as f32,
+                        claw_distance: state.claw_distance,
+                        left_arm: left.cm(),
+                        right_arm: right.cm(),
                     };
                     *simulation = Some(calibrate(brad, calib).await?);
                 }
             },
             Command::SetMaxHang { hang } => {
-                brad.send_cmd_and_wait(Cmd::SetMaxHang(*hang as f32))
-                    .await?;
+                brad.send_cmd_and_wait(Cmd::SetMaxHang(hang.cm())).await?;
                 *simulation = Some(reload_simulation(brad).await?);
             }
             Command::SetMinAngle { angle } => {
-                brad.send_cmd_and_wait(Cmd::SetMinAngleDegrees(*angle as f32))
+                brad.send_cmd_and_wait(Cmd::SetMinAngle(Angle::degrees(*angle)))
                     .await?;
                 *simulation = Some(reload_simulation(brad).await?);
             }
@@ -180,14 +180,14 @@ impl Command {
                     return Err(anyhow!("svg requires calibration").into());
                 };
                 let mut rect = sim.geom.draw_box();
-                if let Some(width) = width {
-                    if *width < rect.width() {
+                if let Some(width) = width.map(f64::from) {
+                    if width < rect.width() {
                         rect.x0 = -width / 2.0;
                         rect.x1 = width / 2.0;
                     }
                 }
-                if let Some(height) = height {
-                    if *height < rect.height() {
+                if let Some(height) = height.map(f64::from) {
+                    if height < rect.height() {
                         let center = rect.center().y;
                         rect.y0 = center - height / 2.0;
                         rect.y1 = center + height / 2.0;
@@ -227,21 +227,18 @@ where
 }
 
 // A clap ValueParser for f64s that are non-negative and not insanely large.
-fn sane_f64(s: &str) -> std::result::Result<f64, clap::Error> {
-    s.parse::<f64>()
-        .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
-        .and_then(|x| {
-            if (0.0..=10_000.0).contains(&x) {
-                Ok(x)
-            } else {
-                Err(clap::Error::new(clap::error::ErrorKind::InvalidValue))
-            }
-        })
+fn sane_f32(s: &str) -> std::result::Result<f32, clap::Error> {
+    sane_signed_f32(s).and_then(|x| {
+        if x >= 0.0 {
+            Ok(x)
+        } else {
+            Err(clap::Error::new(clap::error::ErrorKind::InvalidValue))
+        }
+    })
 }
 
-// TODO: DRY
-fn sane_signed_f64(s: &str) -> std::result::Result<f64, clap::Error> {
-    s.parse::<f64>()
+fn sane_signed_f32(s: &str) -> std::result::Result<f32, clap::Error> {
+    s.parse::<f32>()
         .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
         .and_then(|x| {
             if (-10_000.0..=10_000.0).contains(&x) {

@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+/// The position of the stepper motors, measured in number of steps.
+///
+/// A zero value corresponds to an arm length of zero, and increasing
+/// values correspond to longer arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StepperPositions {
+    pub left: u32,
+    pub right: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StepperSegment {
     pub left_steps: i32,

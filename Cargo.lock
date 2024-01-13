@@ -256,6 +256,7 @@ name = "bradipous-geom"
 version = "0.1.0"
 dependencies = [
  "bradipous-planner",
+ "euclid",
  "kurbo 0.10.4",
  "libm",
  "proptest",
@@ -284,6 +285,7 @@ name = "bradipous-protocol"
 version = "0.1.0"
 dependencies = [
  "bradipous-geom",
+ "euclid",
  "proptest",
  "serde",
 ]
@@ -717,6 +719,16 @@ checksum = "a258e46cdc063eb8519c00b9fc845fc47bcfca4130e2f08e88665ceda8474245"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "euclid"
+version = "0.22.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f253bc5c813ca05792837a0ff4b3a580336b224512d48f7eda1d7dd9210787"
+dependencies = [
+ "num-traits",
+ "serde",
 ]
 
 [[package]]

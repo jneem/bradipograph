@@ -5,10 +5,11 @@ edition = "2021"
 
 [features]
 default = ["std"]
-std = []
+std = ["euclid/std"]
 
 [dependencies]
 bradipous-geom = { version = "0.1.0", path = "../geom", default-features = false }
+euclid = { version = "0.22.9", default-features = false, features = ["libm", "serde"] }
 serde = { version = "1.0.193", default-features = false, features = ["derive"] }
 
 [dev-dependencies]

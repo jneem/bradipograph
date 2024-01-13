@@ -64,11 +64,11 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmd_tx
             let msg = match (GLOBAL.config(), GLOBAL.position()) {
                 (Some(config), Some(pos)) => {
                     let state = State {
-                        claw_distance: config.claw_distance as f32,
-                        spool_radius: config.spool_radius as f32,
-                        max_hang: config.max_hang as f32,
-                        min_angle_deg: config.min_angle.degrees() as f32,
-                        steps_per_revolution: config.steps_per_revolution as f32,
+                        claw_distance: config.claw_distance,
+                        spool_radius: config.spool_radius,
+                        max_hang: config.max_hang,
+                        min_angle: config.min_angle,
+                        steps_per_revolution: config.steps_per_revolution,
                         position: pos,
                         // TODO: think about how to handle pen_down
                         pen_down: false,

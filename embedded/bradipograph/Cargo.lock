@@ -24,12 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
-name = "arrayvec"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
-
-[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -154,7 +148,6 @@ dependencies = [
  "fixed",
  "futures",
  "heapless 0.8.0",
- "kurbo",
  "libm",
  "num-derive",
  "num-traits",
@@ -167,7 +160,7 @@ dependencies = [
 name = "bradipous-geom"
 version = "0.1.0"
 dependencies = [
- "kurbo",
+ "euclid",
  "libm",
  "serde",
 ]
@@ -177,6 +170,7 @@ name = "bradipous-protocol"
 version = "0.1.0"
 dependencies = [
  "bradipous-geom",
+ "euclid",
  "serde",
 ]
 
@@ -746,6 +740,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "euclid"
+version = "0.22.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f253bc5c813ca05792837a0ff4b3a580336b224512d48f7eda1d7dd9210787"
+dependencies = [
+ "num-traits",
+ "serde",
+]
+
+[[package]]
 name = "fixed"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -935,15 +939,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kurbo"
-version = "0.10.4"
-source = "git+https://github.com/jneem/kurbo?branch=no-alloc#7f3213133b2d079e0d5fc561bbac6704782e0fba"
-dependencies = [
- "arrayvec",
- "libm",
-]
-
-[[package]]
 name = "libm"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1052,6 +1047,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]

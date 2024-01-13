@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bradipous_geom::ConfigBuilder;
+use bradipous_geom::{ConfigBuilder, LenExt};
 use bradipous_planner::{smoother::SmoothParts, MotionCurve, PlannerConfig};
 use clap::Parser as _;
 use kurbo::{Affine, BezPath, Shape};
@@ -39,8 +39,8 @@ pub fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let geom_config = ConfigBuilder::default()
-        .with_claw_distance(100.0)
-        .with_max_hang(50.0)
+        .with_claw_distance(100.0.cm())
+        .with_max_hang(50.0.cm())
         .build();
     let target_bbox = geom_config.draw_box();
     let scale = (target_bbox.height() / bbox.height()).min(target_bbox.width() / bbox.width());
