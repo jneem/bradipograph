@@ -12,4 +12,4 @@ members = [
 exclude = [ "embedded/bradipograph" ]
 
 [workspace.dependencies]
-kurbo = { version = "10.4", default-features = false }
+kurbo = { version = "0.10.4", default-features = false }

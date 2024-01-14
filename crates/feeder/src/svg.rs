@@ -16,7 +16,6 @@ pub fn transform(path: &mut BezPath, target_rect: &Rect) {
 }
 
 pub fn load_svg(path: &Path) -> anyhow::Result<BezPath> {
-    // TODO: apparently git master usvg supports text-to-path?
     let data = std::fs::read(path)?;
     let opt = usvg::Options::default();
     let tree = usvg::Tree::from_data(&data, &opt)?;
