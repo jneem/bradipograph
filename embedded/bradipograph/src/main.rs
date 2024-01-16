@@ -4,7 +4,7 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{ArmLengths, Config, ConfigBuilder, LenExt as _, StepperPositions};
+use bradipous_geom::{Config, ConfigBuilder, LenExt as _, StepperPositions};
 use bradipous_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -118,6 +118,9 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, Stepp
 
     let config = if let Some(mut prev_config) = global.config() {
         prev_config.claw_distance = calib.claw_distance;
+        // TODO: make these configurable, and don't override them here
+        prev_config.spool_radius = radius;
+        prev_config.steps_per_revolution = 2036.0;
         prev_config
     } else {
         ConfigBuilder::default()
@@ -127,11 +130,7 @@ fn apply_calibration(global: &GlobalState, calib: Calibration) -> (Config, Stepp
             .build()
     };
 
-    let arm_lengths = ArmLengths {
-        left: calib.left_arm,
-        right: calib.right_arm,
-    };
-    let angles = config.arm_lengths_to_rotor_angles(&arm_lengths);
+    let angles = config.arm_lengths_to_rotor_angles(&calib.arm_lengths);
     let pos = config.rotor_angles_to_stepper_steps(&angles);
 
     global.set_config(config);
@@ -209,10 +208,12 @@ async fn calibrated_control(
             Cmd::PenUp => {
                 servo.set_angle(90).await;
                 GLOBAL.write_to_flash();
+                Timer::after_millis(500).await;
             }
             Cmd::PenDown => {
                 servo.set_angle(0).await;
                 GLOBAL.write_to_flash();
+                Timer::after_millis(500).await;
             }
         }
     }

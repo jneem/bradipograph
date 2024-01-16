@@ -144,7 +144,6 @@ dependencies = [
  "esp-storage",
  "esp-wifi",
  "esp32c3-hal",
- "espilepsy",
  "fixed",
  "futures",
  "heapless 0.8.0",
@@ -550,8 +549,9 @@ dependencies = [
 
 [[package]]
 name = "esp-wifi"
-version = "0.1.1"
-source = "git+https://github.com/esp-rs/esp-wifi?rev=a69545dc4c053b9cc9a7398df9250d16834526b5#a69545dc4c053b9cc9a7398df9250d16834526b5"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f60ac6eccc0523a4f6e20136a87f7cfc2061d06744e14d2431cf1dc02c7a9fd"
 dependencies = [
  "atomic-waker",
  "cfg-if",
@@ -582,8 +582,9 @@ dependencies = [
 
 [[package]]
 name = "esp-wifi-sys"
-version = "0.1.0"
-source = "git+https://github.com/esp-rs/esp-wifi?rev=a69545dc4c053b9cc9a7398df9250d16834526b5#a69545dc4c053b9cc9a7398df9250d16834526b5"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6366eb3f9ddd8d6091896992f2868f5e2f1a7961070b200d375c80dabd0e587d"
 dependencies = [
  "anyhow",
 ]
@@ -724,19 +725,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3482d4659b1cdda54247ac60e6f10cd2365a65c7984e86ef6fdbdb144b66979c"
 dependencies = [
  "esp-hal-common",
-]
-
-[[package]]
-name = "espilepsy"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2846108968e46a862bf596960c08328e3363190fd51cf20a855a2189a5b007d7"
-dependencies = [
- "embassy-executor",
- "embassy-futures",
- "embassy-sync",
- "embassy-time",
- "esp32c3-hal",
 ]
 
 [[package]]

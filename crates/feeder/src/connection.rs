@@ -1,13 +1,14 @@
-use std::time::Duration;
+use std::{cell::RefCell, time::Duration};
 
 use anyhow::anyhow;
-use bradipous_protocol::{CalibrationStatus, Cmd};
+use bradipous_geom::{ConfigBuilder, Point, StepperPositions};
+use bradipous_protocol::{CalibrationStatus, Cmd, State, StepperSegment};
 use btleplug::{
     api::{Central, Characteristic, Peripheral as _, WriteType},
     platform::{Adapter, Peripheral},
 };
-
 use indicatif::{MultiProgress, ProgressBar};
+use piet::RenderContext as _;
 use uuid::{uuid, Uuid};
 
 pub const CONTROL_UUID: Uuid = uuid!("68a79628-2609-4569-8d7d-3b29fde28877");
@@ -20,6 +21,13 @@ pub struct Bradipograph {
     pub control: Characteristic,
     pub calibration: Characteristic,
     pub capacity: Characteristic,
+}
+
+pub trait BradipographLike {
+    async fn read_state(&mut self) -> anyhow::Result<CalibrationStatus>;
+    async fn send_cmd(&self, cmd: Cmd) -> anyhow::Result<()>;
+    async fn send_cmd_and_wait(&mut self, cmd: Cmd) -> anyhow::Result<()>;
+    async fn wait_for_capacity(&mut self, count: usize) -> anyhow::Result<()>;
 }
 
 async fn connect(adapter: &mut Adapter) -> anyhow::Result<Peripheral> {
@@ -115,13 +123,15 @@ impl Bradipograph {
             .write(&ch, buf, WriteType::WithResponse)
             .await?)
     }
+}
 
-    pub async fn read_state(&mut self) -> anyhow::Result<CalibrationStatus> {
+impl BradipographLike for Bradipograph {
+    async fn read_state(&mut self) -> anyhow::Result<CalibrationStatus> {
         let calibration = self.read(self.calibration.clone()).await?;
         Ok(postcard::from_bytes(&calibration)?)
     }
 
-    pub async fn send_cmd(&self, cmd: Cmd) -> anyhow::Result<()> {
+    async fn send_cmd(&self, cmd: Cmd) -> anyhow::Result<()> {
         let buf = postcard::to_allocvec(&cmd)?;
         self.peripheral
             .write(&self.control, &buf, WriteType::WithoutResponse)
@@ -129,13 +139,13 @@ impl Bradipograph {
         Ok(())
     }
 
-    pub async fn send_cmd_and_wait(&mut self, cmd: Cmd) -> anyhow::Result<()> {
+    async fn send_cmd_and_wait(&mut self, cmd: Cmd) -> anyhow::Result<()> {
         let buf = postcard::to_allocvec(&cmd)?;
         self.write(self.control.clone(), &buf).await?;
         Ok(())
     }
 
-    pub async fn wait_for_capacity(&mut self, count: usize) -> anyhow::Result<()> {
+    async fn wait_for_capacity(&mut self, count: usize) -> anyhow::Result<()> {
         loop {
             let data = self.read(self.capacity.clone()).await?;
             if data.len() == 1 && data[0] as usize >= count {
@@ -156,5 +166,144 @@ pub async fn find_bradipograph(adapter: &mut Adapter) -> anyhow::Result<Peripher
                 }
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct RecordedSegment {
+    pub seg: StepperSegment,
+    pub pen_down: bool,
+}
+
+struct MockState {
+    config: bradipous_geom::Config,
+    arm_lengths: StepperPositions,
+    pen_down: bool,
+    segs: Vec<RecordedSegment>,
+}
+
+pub struct MockBradipograph {
+    out: Box<dyn std::io::Write>,
+    inner: std::cell::RefCell<MockState>,
+}
+
+impl BradipographLike for MockBradipograph {
+    async fn read_state(&mut self) -> anyhow::Result<CalibrationStatus> {
+        let cfg = self.inner.borrow().config;
+        Ok(CalibrationStatus::Calibrated(State {
+            claw_distance: cfg.claw_distance,
+            spool_radius: cfg.spool_radius,
+            max_hang: cfg.max_hang,
+            min_angle: cfg.min_angle,
+            steps_per_revolution: cfg.steps_per_revolution,
+            position: self.inner.borrow().arm_lengths,
+            pen_down: self.inner.borrow().pen_down,
+        }))
+    }
+
+    async fn send_cmd(&self, cmd: Cmd) -> anyhow::Result<()> {
+        match cmd {
+            Cmd::Calibrate(c) => {
+                let mut inner = self.inner.borrow_mut();
+                inner.config.set_claw_distance(c.claw_distance);
+
+                let angles = inner.config.arm_lengths_to_rotor_angles(&c.arm_lengths);
+                inner.arm_lengths = inner.config.rotor_angles_to_stepper_steps(&angles);
+            }
+            Cmd::SetMaxHang(h) => {
+                self.inner.borrow_mut().config.max_hang = h;
+            }
+            Cmd::SetMinAngle(a) => {
+                self.inner.borrow_mut().config.set_min_angle(a);
+            }
+            Cmd::Segment(seg) => {
+                let pen_down = self.inner.borrow().pen_down;
+                let mut inner = self.inner.borrow_mut();
+                inner.arm_lengths.left = inner
+                    .arm_lengths
+                    .left
+                    .checked_add_signed(seg.left_steps)
+                    .unwrap();
+                inner.arm_lengths.right = inner
+                    .arm_lengths
+                    .right
+                    .checked_add_signed(seg.right_steps)
+                    .unwrap();
+                inner.segs.push(RecordedSegment { seg, pen_down });
+            }
+            Cmd::PenUp => {
+                self.inner.borrow_mut().pen_down = false;
+            }
+            Cmd::PenDown => {
+                self.inner.borrow_mut().pen_down = true;
+            }
+        }
+        Ok(())
+    }
+
+    async fn send_cmd_and_wait(&mut self, cmd: Cmd) -> anyhow::Result<()> {
+        self.send_cmd(cmd).await
+    }
+
+    async fn wait_for_capacity(&mut self, _count: usize) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+impl MockBradipograph {
+    pub fn with_out_path(out: std::path::PathBuf) -> anyhow::Result<Self> {
+        let config = ConfigBuilder::default().build();
+        let init_steps = config.point_to_steps(&Point::new(0.0, 0.0));
+        Ok(Self {
+            out: Box::new(std::fs::File::create(out)?),
+            inner: RefCell::new(MockState {
+                config,
+                arm_lengths: init_steps,
+                pen_down: false,
+                segs: vec![],
+            }),
+        })
+    }
+
+    pub fn illustrate(&mut self) -> anyhow::Result<()> {
+        let cfg = self.inner.borrow().config;
+        let segs = self.inner.borrow().segs.clone();
+        let mut piet = piet_svg::RenderContext::new(
+            10.0 * piet::kurbo::Size::new(
+                cfg.claw_distance.get().into(),
+                cfg.max_hang.get().into(),
+            ),
+        );
+
+        let mut steps = cfg.point_to_steps(&Point::new(0.0, 0.0));
+        let offset = piet::kurbo::Vec2::new(cfg.claw_distance.get() as f64 / 2.0, 0.0);
+        let scale = piet::kurbo::Affine::scale(10.0);
+
+        for seg in segs {
+            let start_steps = steps;
+
+            steps.left = steps.left.checked_add_signed(seg.seg.left_steps).unwrap();
+            steps.right = steps.right.checked_add_signed(seg.seg.right_steps).unwrap();
+
+            let start = cfg.steps_to_point(&start_steps);
+            let start = scale * (piet::kurbo::Point::new(start.x as f64, start.y as f64) + offset);
+            let end = cfg.steps_to_point(&steps);
+            let end = scale * (piet::kurbo::Point::new(end.x as f64, end.y as f64) + offset);
+
+            piet.fill(piet::kurbo::Circle::new(start, 2.0), &piet::Color::BLACK);
+            piet.fill(piet::kurbo::Circle::new(end, 2.0), &piet::Color::BLACK);
+            piet.stroke(piet::kurbo::Line::new(start, end), &piet::Color::BLACK, 1.0);
+        }
+
+        piet.finish().unwrap();
+        piet.write(&mut self.out)?;
+
+        Ok(())
+    }
+}
+
+impl Drop for MockBradipograph {
+    fn drop(&mut self) {
+        self.illustrate().unwrap();
     }
 }

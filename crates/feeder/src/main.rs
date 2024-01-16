@@ -6,13 +6,14 @@ use std::{
 };
 
 use anyhow::anyhow;
-use bradipous_geom::{Angle, LenExt as _, Point};
+use bradipous_geom::{Angle, ArmLengths, LenExt as _, Point};
 use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
     api::{Central as _, Manager as _, ScanFilter},
-    platform::{Adapter, Manager},
+    platform::Manager,
 };
 use clap::{builder::ValueParser, CommandFactory, FromArgMatches, Parser, Subcommand};
+use connection::{BradipographLike, MockBradipograph};
 use indicatif::ProgressBar;
 use kurbo::{BezPath, Rect, Shape as _};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Prompt, Reedline};
@@ -24,12 +25,17 @@ mod simulator;
 mod svg;
 
 const TICK: Duration = Duration::from_millis(50);
-const MAX_STEPS_PER_SEC: u32 = 400;
+const MAX_STEPS_PER_SEC: u32 = 450;
 // what fraction of a second does it take to reach max velocity
-const MAX_VELOCITY_PER_SEC: u32 = 2;
+const MAX_VELOCITY_PER_SEC: f64 = 1.5;
 
 #[derive(Parser)]
 struct Args {
+    /// If set, simulates a bradipograph and draws its output to an
+    /// svg file at the given path.
+    #[arg(long)]
+    simulate: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -108,14 +114,14 @@ enum Command {
     Query,
 }
 
-async fn reload_simulation(brad: &mut Bradipograph) -> Result<Simulation> {
+async fn reload_simulation(brad: &mut impl BradipographLike) -> Result<Simulation> {
     match brad.read_state().await? {
         CalibrationStatus::Uncalibrated => Err(anyhow!("Calibration mysteriously failed").into()),
         CalibrationStatus::Calibrated(state) => Ok(make_simulation(&state)),
     }
 }
 
-async fn calibrate(brad: &mut Bradipograph, calib: Calibration) -> Result<Simulation> {
+async fn calibrate(brad: &mut impl BradipographLike, calib: Calibration) -> Result<Simulation> {
     brad.send_cmd_and_wait(Cmd::Calibrate(calib)).await?;
     reload_simulation(brad).await
 }
@@ -123,7 +129,7 @@ async fn calibrate(brad: &mut Bradipograph, calib: Calibration) -> Result<Simula
 impl Command {
     async fn execute(
         &self,
-        brad: &mut Bradipograph,
+        brad: &mut impl BradipographLike,
         simulation: &mut Option<Simulation>,
     ) -> Result<()> {
         match self {
@@ -134,8 +140,10 @@ impl Command {
             } => {
                 let calib = Calibration {
                     claw_distance: claw_distance.cm(),
-                    left_arm: left.cm(),
-                    right_arm: right.cm(),
+                    arm_lengths: ArmLengths {
+                        left: left.cm(),
+                        right: right.cm(),
+                    },
                 };
                 *simulation = Some(calibrate(brad, calib).await?);
             }
@@ -146,8 +154,10 @@ impl Command {
                 CalibrationStatus::Calibrated(state) => {
                     let calib = Calibration {
                         claw_distance: state.claw_distance,
-                        left_arm: left.cm(),
-                        right_arm: right.cm(),
+                        arm_lengths: ArmLengths {
+                            left: left.cm(),
+                            right: right.cm(),
+                        },
                     };
                     *simulation = Some(calibrate(brad, calib).await?);
                 }
@@ -258,16 +268,14 @@ fn make_simulation(state: &bradipous_protocol::State) -> Simulation {
     Simulation {
         geom: config,
         max_steps_per_sec: MAX_STEPS_PER_SEC as u16,
-        max_steps_per_sec_per_sec: MAX_STEPS_PER_SEC * MAX_VELOCITY_PER_SEC,
+        max_steps_per_sec_per_sec: (MAX_STEPS_PER_SEC as f64 * MAX_VELOCITY_PER_SEC) as u32,
         pen_down: false, // TODO: make the bradipo report this too
         position: state.position,
         steps_per_sec: 0,
     }
 }
 
-async fn handle_connection(adapter: Adapter, args: &Args) -> Result<()> {
-    let mut brad = Bradipograph::new(adapter).await?;
-
+async fn handle_connection(brad: &mut impl BradipographLike, args: &Args) -> Result<()> {
     let bar = ProgressBar::new_spinner().with_message("Checking calibration...");
     bar.enable_steady_tick(TICK);
 
@@ -280,14 +288,14 @@ async fn handle_connection(adapter: Adapter, args: &Args) -> Result<()> {
     };
 
     if let Some(cmd) = args.command.as_ref() {
-        cmd.execute(&mut brad, &mut simulation).await
+        cmd.execute(brad, &mut simulation).await
     } else {
-        command_mode(&mut brad, simulation).await
+        command_mode(brad, simulation).await
     }
 }
 
 async fn send_path(
-    brad: &mut Bradipograph,
+    brad: &mut impl BradipographLike,
     simulation: &mut Simulation,
     path: &BezPath,
 ) -> Result<()> {
@@ -304,7 +312,7 @@ async fn send_path(
 }
 
 async fn send_file(
-    brad: &mut Bradipograph,
+    brad: &mut impl BradipographLike,
     simulation: &mut Simulation,
     path: &Path,
     target_rect: Rect,
@@ -312,6 +320,8 @@ async fn send_file(
 ) -> Result<()> {
     let mut p = svg::load_svg(path)?;
 
+    // TODO: for each closed path, stroke it then fill it.
+    // TODO: allow pauses for "refreshing" the marker
     svg::transform(&mut p, &target_rect);
     send_path(brad, simulation, &p).await?;
 
@@ -326,7 +336,7 @@ async fn send_file(
     Ok(())
 }
 
-async fn draw_box(brad: &mut Bradipograph, simulation: &mut Simulation) -> Result<()> {
+async fn draw_box(brad: &mut impl BradipographLike, simulation: &mut Simulation) -> Result<()> {
     let bbox = simulation.geom.draw_box();
     let path: BezPath = bbox.path_elements(0.01).collect();
     let cmds = simulation.draw_path(&path, 0.05);
@@ -360,7 +370,10 @@ fn read_cmd(reed: &mut Reedline, prompt: &dyn Prompt) -> Result<Command> {
     }
 }
 
-async fn command_mode(brad: &mut Bradipograph, mut simulation: Option<Simulation>) -> Result<()> {
+async fn command_mode(
+    brad: &mut impl BradipographLike,
+    mut simulation: Option<Simulation>,
+) -> Result<()> {
     let mut reed = Reedline::create();
     let prompt = string_prompt("");
     loop {
@@ -389,18 +402,26 @@ async fn command_mode(brad: &mut Bradipograph, mut simulation: Option<Simulation
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    pretty_env_logger::init();
+
     let args = Args::parse();
 
-    let manager = Manager::new().await?;
-    let adapter = manager
-        .adapters()
-        .await?
-        .into_iter()
-        .next()
-        .ok_or(anyhow!("no bluetooth adapter"))?;
-    adapter.start_scan(ScanFilter::default()).await?;
-    if let Err(Error::Err(_)) = handle_connection(adapter, &args).await {
-        eprintln!("lost connection, exiting...");
+    if let Some(out) = &args.simulate {
+        let mut brad = MockBradipograph::with_out_path(out.clone())?;
+        handle_connection(&mut brad, &args).await.unwrap();
+    } else {
+        let manager = Manager::new().await?;
+        let adapter = manager
+            .adapters()
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(anyhow!("no bluetooth adapter"))?;
+        adapter.start_scan(ScanFilter::default()).await?;
+        let mut brad = Bradipograph::new(adapter).await?;
+        if let Err(Error::Err(_)) = handle_connection(&mut brad, &args).await {
+            eprintln!("lost connection, exiting...");
+        }
     }
 
     Ok(())

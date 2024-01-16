@@ -14,10 +14,14 @@ bradipous-sketcher = { version = "0.1.0", path = "../sketcher" }
 btleplug = "0.11.3"
 clap = { version = "4.4.11", features = ["derive"] }
 crossterm = { version = "0.27.0", features = ["event-stream"] }
+fontdb = "0.16.0"
 futures = "0.3.29"
 indicatif = "0.17.7"
 kurbo = { workspace = true, features = ["std"] }
+piet = "0.6.2"
+piet-svg = "0.6.2"
 postcard = { version = "1.0.8", features = ["alloc"] }
+pretty_env_logger = "0.5.0"
 reedline = "0.26.0"
 tokio = { version = "1.35.0", features = ["macros", "rt-multi-thread", "sync"] }
 usvg = "0.37.0"

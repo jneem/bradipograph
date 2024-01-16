@@ -189,7 +189,7 @@ impl Default for Zigzag {
             row_height: 3.0,
             row_gap: -0.3,
             row_offset: 0.6,
-            zig: 2.0,
+            zig: 1.0,
             zag: -0.5,
         }
     }

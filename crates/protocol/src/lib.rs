@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 mod stepper;
-use bradipous_geom::{Angle, Len, StepperPositions};
+use bradipous_geom::{Angle, ArmLengths, Len, StepperPositions};
 pub use stepper::StepperSegment;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,8 +19,7 @@ pub enum ManualControl {
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Calibration {
     pub claw_distance: Len,
-    pub left_arm: Len,
-    pub right_arm: Len,
+    pub arm_lengths: ArmLengths,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,6 +32,8 @@ pub enum Cmd {
     PenDown,
 }
 
+// TODO: maybe separated the "derived" part of the config from the originalj
+// config, so that we don't need to list the fields here.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {
     pub claw_distance: Len,

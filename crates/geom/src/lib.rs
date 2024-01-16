@@ -189,6 +189,20 @@ pub struct Config {
 }
 
 impl Config {
+    fn recalculate_hang_offset(&mut self) {
+        self.hang_offset = self.claw_distance * tanf(self.min_angle.get());
+    }
+
+    pub fn set_min_angle(&mut self, angle: Angle) {
+        self.min_angle = angle;
+        self.recalculate_hang_offset();
+    }
+
+    pub fn set_claw_distance(&mut self, d: Len) {
+        self.claw_distance = d;
+        self.recalculate_hang_offset();
+    }
+
     pub fn point_to_arm_lengths(&self, p: &Point) -> ArmLengths {
         let x = p.x;
         let y = p.y + self.hang_offset.get();

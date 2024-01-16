@@ -32,15 +32,15 @@ impl Servo {
 
         // One pwm cycle is 20ms. Do the movement over 16 cycles (320ms).
         let diff = duty.abs_diff(self.current_duty);
-        if diff < 16 {
+        if diff < 32 {
             self.channel.set_duty_hw(duty as u32);
         } else {
             self.channel.start_duty_fade_hw(
                 self.current_duty as u32,
                 duty > self.current_duty,
-                16,
+                32,
                 1,
-                diff / 16,
+                diff / 32,
             );
             Timer::after_millis(320).await;
             while self.channel.is_duty_fade_running_hw() {

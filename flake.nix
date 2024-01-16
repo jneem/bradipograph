@@ -29,12 +29,13 @@
         craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
         python-toolchain = pkgs.python3.withPackages (ps: [ps.bleak ps.matplotlib ps.numpy ps.tornado ps.pandas ps.seaborn]);
 
-        firmware = craneLib.buildPackage {
+        commonArgs = {
           src = craneLib.cleanCargoSource (craneLib.path ./.);
           strictDeps = true;
           cargoLock = ./embedded/bradipograph/Cargo.lock;
           cargoToml = ./embedded/bradipograph/Cargo.toml;
           doCheck = false;
+
           postUnpack = ''
             cd $sourceRoot/embedded/bradipograph
             sourceRoot="."
@@ -45,16 +46,24 @@
             rm -rf $out/embedded/bradipograph/src/bin/crane-dummy-*
           '';
         };
+
+        cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+          pname = "bradipograph-deps";
+        });
+
+        firmware = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+        });
       in
       {
-        devShell = craneLib.devShell {
+        devShell = pkgs.mkShell {
           buildInputs = [ pkgs.pkg-config ];
           nativeBuildInputs = with pkgs; [
             cmake
             freetype
             dbus
             mdbook
-            #rust-toolchain
+            rust-toolchain
             python-toolchain
             cargo-espflash
             cargo-outdated

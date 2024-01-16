@@ -16,9 +16,8 @@ embedded-storage = "0.3.1"
 esp-backtrace = { version = "0.9.0", features = ["esp32c3", "esp-println", "print-uart", "panic-handler"] }
 esp-println = { version = "0.7.1", default-features = false, features = ["esp32c3"] }
 esp-storage = { version = "0.3.0", features = ["esp32c3"] }
-esp-wifi = { git = "https://github.com/esp-rs/esp-wifi", rev="a69545dc4c053b9cc9a7398df9250d16834526b5", default-features = false, features = ["ble", "esp32c3", "async"] }
+esp-wifi = { version = "0.2.0", default-features = false, features = ["ble", "esp32c3", "async"] }
 esp32c3-hal = { version = "0.14.0", features = ["embassy", "embassy-time-timg0", "async", "embassy-executor-thread"] }
-espilepsy = "0.2"
 fixed = "1.24.0"
 futures = { version = "0.3.29", default-features = false }
 heapless = { version = "0.8.0", features = ["serde", "portable-atomic"] }
