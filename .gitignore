@@ -2,3 +2,4 @@
 embedded/bradipograph/target
 book/book
 result
+*.svg
