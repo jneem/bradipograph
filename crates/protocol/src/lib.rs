@@ -1,9 +1,9 @@
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 
 use serde::{Deserialize, Serialize};
 
 mod stepper;
-use bradipous_geom::{Angle, ArmLengths, Len, StepperPositions};
+use bradipo_geom::{Angle, ArmLengths, Len, StepperPositions};
 pub use stepper::StepperSegment;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,7 +32,7 @@ pub enum Cmd {
     PenDown,
 }
 
-// TODO: maybe separated the "derived" part of the config from the originalj
+// TODO: maybe separated the "derived" part of the config from the original
 // config, so that we don't need to list the fields here.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {
@@ -47,8 +47,8 @@ pub struct State {
 }
 
 impl State {
-    pub fn geom(&self) -> bradipous_geom::Config {
-        bradipous_geom::ConfigBuilder::default()
+    pub fn geom(&self) -> bradipo_geom::Config {
+        bradipo_geom::ConfigBuilder::default()
             .with_max_hang(self.max_hang)
             .with_spool_radius(self.spool_radius)
             .with_claw_distance(self.claw_distance)

@@ -4,8 +4,8 @@
 
 use core::cell::Cell;
 
-use bradipous_geom::{Config, ConfigBuilder, LenExt as _, StepperPositions};
-use bradipous_protocol::{Calibration, Cmd, StepperSegment};
+use bradipo_geom::{Config, ConfigBuilder, LenExt as _, StepperPositions};
+use bradipo_protocol::{Calibration, Cmd, StepperSegment};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::Timer;

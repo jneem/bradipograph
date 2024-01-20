@@ -1,6 +1,6 @@
 use anyhow::anyhow;
-use bradipous_sketcher::Zigzag;
-use bradipous_sketcher::{load_svg, transform};
+use bradipo_sketcher::Zigzag;
+use bradipo_sketcher::{load_svg, transform};
 use clap::value_parser;
 use clap::Parser as _;
 use kurbo::{ParamCurve as _, Shape as _};
@@ -58,7 +58,7 @@ pub fn main() -> anyhow::Result<()> {
     let bbox = transform * orig_bbox;
     let clip = transform * clip;
 
-    let polys = bradipous_sketcher::to_polygons(&clip, 0.1);
+    let polys = bradipo_sketcher::to_polygons(&clip, 0.1);
     let clipped = Zigzag::default().clipped_to(&clip);
 
     let points: Vec<_> = clipped

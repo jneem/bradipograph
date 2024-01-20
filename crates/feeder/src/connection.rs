@@ -1,8 +1,8 @@
 use std::{cell::RefCell, time::Duration};
 
 use anyhow::anyhow;
-use bradipous_geom::{ConfigBuilder, Point, StepperPositions};
-use bradipous_protocol::{CalibrationStatus, Cmd, State, StepperSegment};
+use bradipo_geom::{ConfigBuilder, Point, StepperPositions};
+use bradipo_protocol::{CalibrationStatus, Cmd, State, StepperSegment};
 use btleplug::{
     api::{Central, Characteristic, Peripheral as _, WriteType},
     platform::{Adapter, Peripheral},
@@ -176,7 +176,7 @@ pub struct RecordedSegment {
 }
 
 struct MockState {
-    config: bradipous_geom::Config,
+    config: bradipo_geom::Config,
     arm_lengths: StepperPositions,
     pen_down: bool,
     segs: Vec<RecordedSegment>,

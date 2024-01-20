@@ -3,8 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bradipous_geom::{ConfigBuilder, LenExt};
-use bradipous_planner::{smoother::SmoothParts, MotionCurve, PlannerConfig};
+use bradipo_geom::{ConfigBuilder, LenExt};
+use bradipo_planner::{smoother::SmoothParts, MotionCurve, PlannerConfig};
 use clap::Parser as _;
 use kurbo::{Affine, BezPath, Shape};
 use piet::{kurbo::Circle, Color, RenderContext};

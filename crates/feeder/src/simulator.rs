@@ -1,10 +1,10 @@
-use bradipous_geom::{Angle, FromKurbo as _, Point, RotorAngles, StepperPositions};
-use bradipous_planner::{MotionCurve, PlannerConfig};
-use bradipous_protocol::{Cmd, StepperSegment};
+use bradipo_geom::{Angle, FromKurbo as _, Point, RotorAngles, StepperPositions};
+use bradipo_planner::{MotionCurve, PlannerConfig};
+use bradipo_protocol::{Cmd, StepperSegment};
 use kurbo::{BezPath, ParamCurve as _, PathSeg};
 
 pub struct Simulation {
-    pub geom: bradipous_geom::Config,
+    pub geom: bradipo_geom::Config,
     pub max_steps_per_sec: u16,
     pub max_steps_per_sec_per_sec: u32,
     pub pen_down: bool,
@@ -97,7 +97,7 @@ impl Simulation {
             accuracy: accuracy as f64,
         };
 
-        let mut smooth_parts = bradipous_planner::smoother::SmoothParts::new(path.segments());
+        let mut smooth_parts = bradipo_planner::smoother::SmoothParts::new(path.segments());
         let mut ret = Vec::new();
         while let Some(part) = smooth_parts.next_part() {
             let part: Vec<PathSeg> = part.collect();

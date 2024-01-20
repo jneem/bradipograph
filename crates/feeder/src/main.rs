@@ -6,8 +6,8 @@ use std::{
 };
 
 use anyhow::anyhow;
-use bradipous_geom::{Angle, ArmLengths, LenExt as _, Point};
-use bradipous_protocol::{Calibration, CalibrationStatus, Cmd};
+use bradipo_geom::{Angle, ArmLengths, LenExt as _, Point};
+use bradipo_protocol::{Calibration, CalibrationStatus, Cmd};
 use btleplug::{
     api::{Central as _, Manager as _, ScanFilter},
     platform::Manager,
@@ -261,7 +261,7 @@ fn sane_signed_f32(s: &str) -> std::result::Result<f32, clap::Error> {
 
 type Result<T> = std::result::Result<T, Error>;
 
-fn make_simulation(state: &bradipous_protocol::State) -> Simulation {
+fn make_simulation(state: &bradipo_protocol::State) -> Simulation {
     let config = state.geom();
     eprintln!("Calibration {state:?}");
 
@@ -320,13 +320,12 @@ async fn send_file(
 ) -> Result<()> {
     let mut p = svg::load_svg(path)?;
 
-    // TODO: for each closed path, stroke it then fill it.
     // TODO: allow pauses for "refreshing" the marker
     svg::transform(&mut p, &target_rect);
     send_path(brad, simulation, &p).await?;
 
     if fill {
-        let zigzag = bradipous_sketcher::Zigzag::default().clipped_to(&p);
+        let zigzag = bradipo_sketcher::Zigzag::default().clipped_to(&p);
 
         for lines in zigzag {
             send_path(brad, simulation, &lines).await?;

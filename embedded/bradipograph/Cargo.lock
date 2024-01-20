@@ -127,12 +127,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "bradipo-geom"
+version = "0.1.0"
+dependencies = [
+ "euclid",
+ "libm",
+ "serde",
+]
+
+[[package]]
+name = "bradipo-protocol"
+version = "0.1.0"
+dependencies = [
+ "bradipo-geom",
+ "euclid",
+ "serde",
+]
+
+[[package]]
 name = "bradipograph"
 version = "0.1.0"
 dependencies = [
  "bleps",
- "bradipous-geom",
- "bradipous-protocol",
+ "bradipo-geom",
+ "bradipo-protocol",
  "embassy-executor",
  "embassy-sync",
  "embassy-time",
@@ -153,24 +171,6 @@ dependencies = [
  "postcard",
  "serde",
  "static_cell",
-]
-
-[[package]]
-name = "bradipous-geom"
-version = "0.1.0"
-dependencies = [
- "euclid",
- "libm",
- "serde",
-]
-
-[[package]]
-name = "bradipous-protocol"
-version = "0.1.0"
-dependencies = [
- "bradipous-geom",
- "euclid",
- "serde",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "bradipous-planner"
+name = "bradipo-planner"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,7 +11,7 @@ serde = { version = "1.0.190", features = ["derive"] }
 
 [dev-dependencies]
 anyhow = "1.0.75"
-bradipous-geom = { path = "../geom" }
+bradipo-geom = { path = "../geom" }
 clap = { version = "4.4.7", features = ["derive"] }
 kurbo = { workspace = true, features = ["std"] }
 piet = "0.6.2"

@@ -11,7 +11,7 @@ use esp32c3_hal::peripherals::BT;
 use esp_println::println;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
 
-use bradipous_protocol::{CalibrationStatus, Cmd, State};
+use bradipo_protocol::{CalibrationStatus, Cmd, State};
 use heapless::spsc::{Consumer, Producer};
 
 use crate::GLOBAL;

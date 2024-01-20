@@ -99,7 +99,6 @@ impl MotionCurve {
             config.max_acceleration,
         );
 
-        // TODO: panics if not enough capacity
         self.points
             .extend(transformed_path.evals(plan.time.iter().copied()));
         self.energies.extend_from_slice(&plan.energy);

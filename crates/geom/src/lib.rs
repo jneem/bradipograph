@@ -92,10 +92,10 @@ impl RotorAngles {
 pub type StepperPositions = LeftRight<u32>;
 
 pub struct ConfigBuilder {
-    min_angle: Angle,
-    max_hang: Len,
     claw_distance: Len,
     spool_radius: Len,
+    max_hang: Len,
+    min_angle: Angle,
     steps_per_revolution: f32,
     side_inset: Len,
 }
@@ -160,7 +160,7 @@ pub struct Config {
     pub claw_distance: Len,
     /// The radius of the spools that the string winds around.
     pub spool_radius: Len,
-    /// The bradipous can't lift itself all the way up to its claws, because
+    /// The bradipograph can't lift itself all the way up to its claws, because
     /// there would be too much tension on the arms. The min angle controls
     /// how high it can get: when dangling directly below the left claw, measure
     /// the angle between the right arm and a horizontal line. This angle
@@ -271,7 +271,7 @@ impl Config {
 }
 
 #[cfg(feature = "kurbo")]
-impl bradipous_planner::Transform for Config {
+impl bradipo_planner::Transform for Config {
     fn f(&self, input: kurbo::Point) -> kurbo::Point {
         self.arm_lengths_to_rotor_angles(&self.point_to_arm_lengths(&Point::from_kurbo(input)))
             .to_kurbo_point()
@@ -323,7 +323,7 @@ impl bradipous_planner::Transform for Config {
 #[cfg(all(test, feature = "kurbo"))]
 mod tests {
     use super::*;
-    use bradipous_planner::Transform;
+    use bradipo_planner::Transform;
     use proptest::prelude::*;
 
     impl Arbitrary for Config {

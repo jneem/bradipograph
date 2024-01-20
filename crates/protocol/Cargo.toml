@@ -1,5 +1,5 @@
 [package]
-name = "bradipous-protocol"
+name = "bradipo-protocol"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ default = ["std"]
 std = ["euclid/std"]
 
 [dependencies]
-bradipous-geom = { version = "0.1.0", path = "../geom", default-features = false }
+bradipo-geom = { version = "0.1.0", path = "../geom", default-features = false }
 euclid = { version = "0.22.9", default-features = false, features = ["libm", "serde"] }
 serde = { version = "1.0.193", default-features = false, features = ["derive"] }
 

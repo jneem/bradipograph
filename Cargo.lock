@@ -239,14 +239,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "bradipous-feeder"
+name = "bradipo-feeder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bradipous-geom",
- "bradipous-planner",
- "bradipous-protocol",
- "bradipous-sketcher",
+ "bradipo-geom",
+ "bradipo-planner",
+ "bradipo-protocol",
+ "bradipo-sketcher",
  "btleplug",
  "clap",
  "crossterm",
@@ -265,10 +265,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "bradipous-geom"
+name = "bradipo-geom"
 version = "0.1.0"
 dependencies = [
- "bradipous-planner",
+ "bradipo-planner",
  "euclid",
  "kurbo 0.10.4",
  "libm",
@@ -277,11 +277,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "bradipous-planner"
+name = "bradipo-planner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bradipous-geom",
+ "bradipo-geom",
  "clap",
  "kurbo 0.10.4",
  "piet",
@@ -294,17 +294,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "bradipous-protocol"
+name = "bradipo-protocol"
 version = "0.1.0"
 dependencies = [
- "bradipous-geom",
+ "bradipo-geom",
  "euclid",
  "proptest",
  "serde",
 ]
 
 [[package]]
-name = "bradipous-sketcher"
+name = "bradipo-sketcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
