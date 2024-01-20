@@ -64,14 +64,9 @@ pub async fn ble_task(init: EspWifiInitialization, mut bt_peripheral: BT, cmd_tx
             let msg = match (GLOBAL.config(), GLOBAL.position()) {
                 (Some(config), Some(pos)) => {
                     let state = State {
-                        claw_distance: config.claw_distance,
-                        spool_radius: config.spool_radius,
-                        max_hang: config.max_hang,
-                        min_angle: config.min_angle,
-                        steps_per_revolution: config.steps_per_revolution,
+                        geom: config.into(),
                         position: pos,
-                        // TODO: think about how to handle pen_down
-                        pen_down: false,
+                        pen_down: GLOBAL.pen_down(),
                     };
                     CalibrationStatus::Calibrated(state)
                 }

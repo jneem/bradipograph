@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use serde::{Deserialize, Serialize};
 
@@ -32,29 +32,16 @@ pub enum Cmd {
     PenDown,
 }
 
-// TODO: maybe separated the "derived" part of the config from the original
-// config, so that we don't need to list the fields here.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {
-    pub claw_distance: Len,
-    pub spool_radius: Len,
-    pub max_hang: Len,
-    pub min_angle: Angle,
-    pub steps_per_revolution: f32,
-
+    pub geom: bradipo_geom::ConfigBuilder,
     pub position: StepperPositions,
     pub pen_down: bool,
 }
 
 impl State {
     pub fn geom(&self) -> bradipo_geom::Config {
-        bradipo_geom::ConfigBuilder::default()
-            .with_max_hang(self.max_hang)
-            .with_spool_radius(self.spool_radius)
-            .with_claw_distance(self.claw_distance)
-            .with_min_angle(self.min_angle)
-            .with_steps_per_revolution(self.steps_per_revolution)
-            .build()
+        self.geom.build()
     }
 }
 

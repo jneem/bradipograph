@@ -91,22 +91,27 @@ impl RotorAngles {
 /// values correspond to longer arms.
 pub type StepperPositions = LeftRight<u32>;
 
+/// Builder for [`Config`].
+///
+/// This contains all of the independent parameters that describe the
+/// geometry of the bradipograph.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ConfigBuilder {
-    claw_distance: Len,
-    spool_radius: Len,
-    max_hang: Len,
-    min_angle: Angle,
-    steps_per_revolution: f32,
-    side_inset: Len,
+    pub claw_distance: Len,
+    pub spool_radius: Len,
+    pub max_hang: Len,
+    pub min_angle: Angle,
+    pub steps_per_revolution: f32,
+    pub side_inset: Len,
 }
 
 impl Default for ConfigBuilder {
     fn default() -> Self {
         Self {
-            min_angle: Angle::degrees(10.0),
+            min_angle: Angle::degrees(15.0),
             max_hang: 100.0.cm(),
             claw_distance: 100.0.cm(),
-            spool_radius: 1.3.cm(),
+            spool_radius: 1.35.cm(),
             steps_per_revolution: 2036.0,
             side_inset: 10.0.cm(),
         }
@@ -267,6 +272,22 @@ impl Config {
         let w = self.claw_distance.get() as f64 / 2.0 - self.side_inset.get() as f64;
         let h = self.max_hang.get() as f64 - self.hang_offset.get() as f64;
         kurbo::Rect::new(-w, 0.0, w, h)
+    }
+}
+
+// Because it contains all the independent parameters, the `ConfigBuilder` is the one that
+// gets sent back and forth on the wire, not the `Config`. Therefore it is useful to extract
+// the builder back from the completed configuration.
+impl From<Config> for ConfigBuilder {
+    fn from(c: Config) -> Self {
+        ConfigBuilder {
+            claw_distance: c.claw_distance,
+            spool_radius: c.spool_radius,
+            max_hang: c.max_hang,
+            min_angle: c.min_angle,
+            steps_per_revolution: c.steps_per_revolution,
+            side_inset: c.side_inset,
+        }
     }
 }
 

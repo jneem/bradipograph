@@ -191,11 +191,7 @@ impl BradipographLike for MockBradipograph {
     async fn read_state(&mut self) -> anyhow::Result<CalibrationStatus> {
         let cfg = self.inner.borrow().config;
         Ok(CalibrationStatus::Calibrated(State {
-            claw_distance: cfg.claw_distance,
-            spool_radius: cfg.spool_radius,
-            max_hang: cfg.max_hang,
-            min_angle: cfg.min_angle,
-            steps_per_revolution: cfg.steps_per_revolution,
+            geom: cfg.into(),
             position: self.inner.borrow().arm_lengths,
             pen_down: self.inner.borrow().pen_down,
         }))

@@ -153,7 +153,7 @@ impl Command {
                 }
                 CalibrationStatus::Calibrated(state) => {
                     let calib = Calibration {
-                        claw_distance: state.claw_distance,
+                        claw_distance: state.geom.claw_distance,
                         arm_lengths: ArmLengths {
                             left: left.cm(),
                             right: right.cm(),

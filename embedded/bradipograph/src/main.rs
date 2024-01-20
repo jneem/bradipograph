@@ -53,11 +53,13 @@ const FLASH_ADDR: u32 = 0x110000;
 static GLOBAL: GlobalState = GlobalState {
     config: Mutex::new(Cell::new(None)),
     position: Mutex::new(Cell::new(None)),
+    pen_down: Mutex::new(Cell::new(false)),
 };
 
 struct GlobalState {
     config: Mutex<Cell<Option<Config>>>,
     position: Mutex<Cell<Option<StepperPositions>>>,
+    pen_down: Mutex<Cell<bool>>,
 }
 
 impl GlobalState {
@@ -67,6 +69,10 @@ impl GlobalState {
 
     pub fn position(&self) -> Option<StepperPositions> {
         self.position.lock(|p| p.get())
+    }
+
+    pub fn pen_down(&self) -> bool {
+        self.pen_down.lock(|p| p.get())
     }
 
     pub fn set_config(&self, config: Config) {
@@ -84,6 +90,10 @@ impl GlobalState {
 
     pub fn set_position(&self, pos: StepperPositions) {
         self.position.lock(|p| p.set(Some(pos)));
+    }
+
+    pub fn set_pen_down(&self, down: bool) {
+        self.pen_down.lock(|p| p.set(down));
     }
 
     pub fn write_to_flash(&self) {
@@ -171,9 +181,16 @@ async fn calibrated_control(
 ) {
     let mut maybe_steps = GLOBAL.position();
     loop {
+        let mut written = false;
         let cmd = loop {
             if let Some(cmd) = cmds.dequeue() {
                 break cmd;
+            }
+            if !written {
+                // If we get here, our command queue is empty so let's take the
+                // opportunity to write our current state to flash.
+                GLOBAL.write_to_flash();
+                written = true;
             }
             Timer::after_millis(2).await
         };
@@ -207,11 +224,13 @@ async fn calibrated_control(
             }
             Cmd::PenUp => {
                 servo.set_angle(90).await;
+                GLOBAL.set_pen_down(false);
                 GLOBAL.write_to_flash();
                 Timer::after_millis(500).await;
             }
             Cmd::PenDown => {
                 servo.set_angle(0).await;
+                GLOBAL.set_pen_down(true);
                 GLOBAL.write_to_flash();
                 Timer::after_millis(500).await;
             }
