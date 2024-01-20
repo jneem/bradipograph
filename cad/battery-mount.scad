@@ -85,10 +85,10 @@ module PowerRegulator() {
 }
 
 module PowerSwitch() {
-    h = 5;
-    d = 3;
+    h = 10;
+    d = 6;
 
-    translate([-3.5, d / 2, h / 2])
+    translate([-3.5, 0, h / 2])
     difference() {
         cube([7, d, h], center = true);
         translate([0, 0, 2]) cube([3, d + 0.01, h], center = true);

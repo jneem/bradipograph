@@ -18,7 +18,7 @@ StepperScrewAngle = 22.5;
 // Stepper driver
 DriverWidth = 31.4;
 DriverHeight = 35.4;
-DriverPosition = [33.15, -80];
+DriverPosition = [29.5, -85.55];
 DriverScrewPositions = [
     DriverPosition + [2.54, 2.54],
     DriverPosition + [DriverWidth, 0] - [2.54, -2.54],
@@ -74,7 +74,7 @@ module LooseScrewHole() {
 
 
 module EyeSocket() {
-        linear_extrude(StrokeHeight)
+        linear_extrude(StrokeHeight, convexity=2)
         strokeCircle(EyeRadius, 180 + NoseArcAngle, 360 + 90 - BrowAngle, StrokeWidth);
 }
 
@@ -270,11 +270,6 @@ module DriverScrewSupports() {
         for(p=DriverScrewPositions) {
             translate(p) ScrewSupport(StrokeHeight);
         }
-        
-        linear_extrude(StrokeHeight)
-        offset(r=StrokeWidth/2)
-        translate(DriverScrewPositions[0] + [0, -2.5])
-        square([0.01, 5], center = true);
     }
     
     Right();
