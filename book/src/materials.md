@@ -38,7 +38,9 @@ markers (which are about 1.5cm in diameter). You'll also need a marker.
 
 You'll need wires to hook everything up. The stepper motors and servo usually
 come with their own wires, so you'll mostly just need wires to hook power up
-to everything.
+to everything. The positive end of the 5v power needs to join together 5 wires, and the
+ground needs to join together 7 wires. I crimped ring terminals to the ends of these
+wires and joined them with a screw.
 
 You don't *need* a power switch, but I think it's nice to have one.
 
@@ -46,7 +48,7 @@ You'll need some string for hanging the device (sewing thread or thin fishing li
 and some way to attach it to the drawing surface. For drawing on whiteboards or windows,
 suction cups work well.
 
-Finally, you'll need some screws to hold it together: 15 M3 screws (two of them need to be at least 8mm long; the
+Finally, you'll need some screws to hold it together: 17 M3 screws (two of them need to be at least 8mm long; the
 rest can be shorter) and two M2 screws.
 
 ## Tools and equipment
@@ -55,5 +57,6 @@ rest can be shorter) and two M2 screws.
 - a 3d printer (or the use of one for a few hours)
 - a screwdriver
 - a tool for cutting and stripping wire
+- a crimping tool (optional)
 - a USB-C data cable
 - a computer
