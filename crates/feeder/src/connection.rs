@@ -8,7 +8,10 @@ use btleplug::{
     platform::{Adapter, Peripheral},
 };
 use indicatif::{MultiProgress, ProgressBar};
-use piet::RenderContext as _;
+use svg::{
+    node::element::{path::Data, Circle, Path},
+    Document,
+};
 use uuid::{uuid, Uuid};
 
 pub const CONTROL_UUID: Uuid = uuid!("68a79628-2609-4569-8d7d-3b29fde28877");
@@ -264,16 +267,12 @@ impl MockBradipograph {
     pub fn illustrate(&mut self) -> anyhow::Result<()> {
         let cfg = self.inner.borrow().config;
         let segs = self.inner.borrow().segs.clone();
-        let mut piet = piet_svg::RenderContext::new(
-            10.0 * piet::kurbo::Size::new(
-                cfg.claw_distance.get().into(),
-                cfg.max_hang.get().into(),
-            ),
-        );
+        // Multiply all dimensions by 10 because firefox doesn't like to see small svgs.
+        let w = cfg.claw_distance.get() * 10.0;
 
         let mut steps = cfg.point_to_steps(&Point::new(0.0, 0.0));
-        let offset = piet::kurbo::Vec2::new(cfg.claw_distance.get() as f64 / 2.0, 0.0);
-        let scale = piet::kurbo::Affine::scale(10.0);
+        let mut lines = Vec::new();
+        let mut points = Vec::new();
 
         for seg in segs {
             let start_steps = steps;
@@ -281,18 +280,42 @@ impl MockBradipograph {
             steps.left = steps.left.checked_add_signed(seg.seg.left_steps).unwrap();
             steps.right = steps.right.checked_add_signed(seg.seg.right_steps).unwrap();
 
-            let start = cfg.steps_to_point(&start_steps);
-            let start = scale * (piet::kurbo::Point::new(start.x as f64, start.y as f64) + offset);
-            let end = cfg.steps_to_point(&steps);
-            let end = scale * (piet::kurbo::Point::new(end.x as f64, end.y as f64) + offset);
+            let start = cfg.steps_to_point(&start_steps) * 10.0;
+            let end = cfg.steps_to_point(&steps) * 10.0;
 
-            piet.fill(piet::kurbo::Circle::new(start, 2.0), &piet::Color::BLACK);
-            piet.fill(piet::kurbo::Circle::new(end, 2.0), &piet::Color::BLACK);
-            piet.stroke(piet::kurbo::Line::new(start, end), &piet::Color::BLACK, 1.0);
+            points.push(
+                Circle::new()
+                    .set("cx", start.x)
+                    .set("cy", start.y)
+                    .set("r", 2.0)
+                    .set("fill", "blue"),
+            );
+            points.push(
+                Circle::new()
+                    .set("cx", start.x)
+                    .set("cy", start.y)
+                    .set("fill", "blue"),
+            );
+
+            let data = Data::new()
+                .move_to((start.x, start.y))
+                .line_to((end.x, end.y));
+            let line = Path::new()
+                .set("fill", "none")
+                .set("stroke", "black")
+                .set("stroke-width", 1)
+                .set("d", data);
+            lines.push(line);
         }
 
-        piet.finish().unwrap();
-        piet.write(&mut self.out)?;
+        let mut document = Document::new().set("viewBox", (-w / 2.0, 0.0, w, cfg.max_hang.get()));
+        for line in lines {
+            document = document.add(line);
+        }
+        for p in points {
+            document = document.add(p);
+        }
+        svg::write(&mut self.out, &document)?;
 
         Ok(())
     }

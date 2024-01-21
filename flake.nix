@@ -25,6 +25,7 @@
           fx.latest.rustfmt
           fx.latest.rust-src
           fx.targets.riscv32imc-unknown-none-elf.latest.rust-std
+          fx.targets.x86_64-unknown-linux-musl.latest.rust-std
         ];
         craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
         python-toolchain = pkgs.python3.withPackages (ps: [ps.bleak ps.matplotlib ps.numpy ps.tornado ps.pandas ps.seaborn]);
@@ -54,6 +55,22 @@
         firmware = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
+
+        feederStatic = craneLib.buildPackage {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          version = "0.1.0";
+          pname = "bradipo-feeder";
+          cargoExtraArgs = "-p bradipo-feeder";
+          nativeBuildInputs = [
+            pkgs.pkg-config
+          ];
+
+          buildInputs = with pkgs.pkgsStatic; [
+            dbus
+          ];
+
+          CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+        };
       in
       {
         devShell = pkgs.mkShell {
@@ -74,7 +91,7 @@
         };
 
         packages = {
-          inherit firmware;
+          inherit firmware feederStatic;
         };
       }
     );
