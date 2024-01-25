@@ -21,3 +21,12 @@ jobs:
           path: |
             result/bin/bradipograph
             embedded/bradipograph/partition.csv
+
+      - name: Build feeder
+        run: nix build .#feederStatic
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bradipo-feeder
+          path: |
+            result/bin/bradipo-feeder
