@@ -71,6 +71,8 @@
 
           CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
         };
+
+        # TODO: support building the stl file also
       in
       {
         devShell = pkgs.mkShell {
@@ -79,6 +81,7 @@
             cmake
             freetype
             dbus
+            imagemagick
             mdbook
             rust-toolchain
             python-toolchain

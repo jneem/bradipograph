@@ -3,3 +3,6 @@ embedded/bradipograph/target
 book/book
 result
 *.svg
+*.JPG
+*.jpeg
+*.xcf
