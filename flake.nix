@@ -74,15 +74,13 @@
 
         book = pkgs.stdenv.mkDerivation {
           name = "bradipograph-book";
-          # TODO: filter the sources
-          src = ./.;
+          src = ./book;
 
           buildInputs = with pkgs; [
             mdbook
           ];
 
           buildPhase = ''
-            cd book
             mdbook build -d $out
           '';
         };
