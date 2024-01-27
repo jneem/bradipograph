@@ -72,6 +72,21 @@
           CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
         };
 
+        book = pkgs.stdenv.mkDerivation {
+          name = "bradipograph-book";
+          # TODO: filter the sources
+          src = ./.;
+
+          buildInputs = with pkgs; [
+            mdbook
+          ];
+
+          buildPhase = ''
+            cd book
+            mdbook build -d $out
+          '';
+        };
+
         # TODO: support building the stl file also
       in
       {
@@ -94,7 +109,7 @@
         };
 
         packages = {
-          inherit firmware feederStatic;
+          inherit firmware feederStatic book;
         };
       }
     );
