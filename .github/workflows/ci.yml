@@ -15,18 +15,7 @@ jobs:
       - name: Build firmware
         run: nix build .#firmware
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bradipograph-firmware
-          path: |
-            result/bin/bradipograph
-            embedded/bradipograph/partition.csv
-
       - name: Build feeder
         run: nix build .#feederStatic
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bradipo-feeder
-          path: |
-            result/bin/bradipo-feeder
+        # TODO: make a nix flake check

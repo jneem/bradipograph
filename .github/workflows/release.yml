@@ -1,0 +1,23 @@
+name: Release
+
+on:
+  push:
+    branch:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build release
+        run: nix build .#firmware .#feederStatic .#stlFiles
+
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "result/bin/bradipograph,result-1/bin/bradipo-feeder,result-2/*.stl"

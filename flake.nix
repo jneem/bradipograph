@@ -85,7 +85,21 @@
           '';
         };
 
-        # TODO: support building the stl file also
+        stlFiles = pkgs.stdenv.mkDerivation {
+          name = "bradipograph-stl";
+          src = ./cad;
+
+          buildInputs = with pkgs; [
+            openscad
+          ];
+
+          buildPhase = ''
+            mkdir $out
+            for f in *.scad; do
+              openscad "$f" -o "$out/''${f%.scad}.stl"
+            done
+          '';
+        };
       in
       {
         devShell = pkgs.mkShell {
@@ -107,7 +121,7 @@
         };
 
         packages = {
-          inherit firmware feederStatic book;
+          inherit firmware feederStatic book stlFiles;
         };
       }
     );
