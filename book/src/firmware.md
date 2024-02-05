@@ -7,7 +7,7 @@ computer.
 ## Obtain the feeder
 
 Currently, the control software (the "feeder") is only built and tested on x86_64 linux; a statically-linked executable
-is available [here](https://github.com/jneem/bradipograph/releases/download/latest/bradipo-feeder). After downloading it
+is available [here](https://github.com/jneem/bradipograph/releases/latest/download/bradipo-feeder). After downloading it
 and marking it executable, you should be able to run it:
 
 ```
@@ -38,7 +38,7 @@ the source code is [here](https://github.com/jneem/bradipograph/tree/main/crates
 ## Flash the firmware
 
 1. Install `espflash` by following its [installation instructions](https://github.com/esp-rs/espflash/blob/main/espflash/README.md#installation).
-2. Download the latest bradipograph [firmware](https://github.com/jneem/bradipograph/releases/download/latest/bradipograph) and the [partition map](https://github.com/jneem/bradipograph/releases/download/latest/partition.csv).
+2. Download the latest bradipograph [firmware](https://github.com/jneem/bradipograph/releases/latest/download/bradipograph) and the [partition map](https://github.com/jneem/bradipograph/releases/latest/download/partition.csv).
 3. Connect your ESP32-C3 (part number 5 in [Materials](./materials.md#other-parts)) to your computer with a USB cable. Your device should
    show up as a serial port; note its name. (On my linux system, it's usually `/dev/ttyACM0`.)
 4. Flash your device:
