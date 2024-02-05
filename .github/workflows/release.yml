@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    branch:
-      - main
+    tags:
+      - v*
 
 jobs:
   build:
@@ -21,6 +21,3 @@ jobs:
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "result/bin/bradipograph,result-1/bin/bradipo-feeder,result-2/*.stl,embedded/bradipograph/partition.csv"
-          # TODO: use actual versions
-          replacesArtifacts: true
-          tag: "latest"
