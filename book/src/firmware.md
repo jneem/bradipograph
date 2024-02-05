@@ -32,7 +32,7 @@ Options:
   -h, --help                 Print help
 ```
 
-It feeder should also run on Windows and macOS, but you'll need to figure it out yourself;
+The feeder should also run on Windows and macOS, but you'll need to figure it out yourself;
 the source code is [here](https://github.com/jneem/bradipograph/tree/main/crates/feeder).
 
 ## Flash the firmware
