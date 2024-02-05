@@ -20,5 +20,5 @@ jobs:
 
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "result/bin/bradipograph,result-1/bin/bradipo-feeder,result-2/*.stl"
+          artifacts: "result/bin/bradipograph,result-1/bin/bradipo-feeder,result-2/*.stl,embedded/bradipograph/partition.csv"
           tag: "latest"

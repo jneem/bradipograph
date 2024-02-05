@@ -13,3 +13,7 @@ exclude = [ "embedded/bradipograph" ]
 
 [workspace.dependencies]
 kurbo = { version = "0.10.4", default-features = false }
+
+[workspace.package]
+authors = ["Joe Neeman <joeneeman@gmail.com>"]
+repository = "https://github.com/jneem/bradipograph"
